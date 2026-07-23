@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Secrets — API keys live here, never commit them
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# JS (frontend, later)
+node_modules/
+
+# Private — kept LOCAL, never published (docs, mockups, drafts, tooling)
+CLAUDE.md
+PRD.md
+CLAUDE-3.md
+PRD-3.md
+coderace-ui-mockup.html
+coderace-waitlist.html
+coderace-landing-lovable.html
+.claude/

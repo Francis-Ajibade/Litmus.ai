@@ -1,0 +1,26 @@
+# Everything Docker sends to the daemon as "build context" on every build.
+# Our Dockerfile COPYs nothing, so none of this is needed to build the image —
+# excluding it just keeps the build fast and keeps secrets out of the context.
+
+# Local Python environment + caches (the "local modules")
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Version control + OS cruft
+.git/
+.gitignore
+.DS_Store
+
+# Secrets must NEVER enter a build context
+.env
+.env.*
+
+# JS deps (frontend comes much later)
+node_modules/
+
+# Docs / tooling not needed to build the image
+*.md
+.claude/
