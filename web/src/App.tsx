@@ -1,10 +1,5 @@
-import Nav from './components/waitlist/Nav'
-import Hero from './components/waitlist/Hero'
-import SignupForm from './components/waitlist/SignupForm'
-import Claims from './components/waitlist/Claims'
-import RaceDemo from './components/waitlist/Racedemo'
-import Honest from './components/waitlist/Honest'
-import Footer from './components/waitlist/Footer'
+
+import Litmus from "./components/Litmus/Litmus"
 
 function App() {
   // The page shell: dark background (mockup --bg #08080a), light text
@@ -34,8 +29,8 @@ function App() {
       {/* layer 1: grain */}
       <div className="grain fixed inset-0 pointer-events-none z-1" />
 
-      <div className="relative z-2 max-w-[1080px] mx-auto px-6">
-
+      <div className="relative z-2">
+          <Litmus />
       </div>
     </div>
   )

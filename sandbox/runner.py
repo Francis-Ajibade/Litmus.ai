@@ -193,7 +193,7 @@ def _build_result(
         errors=summary.get("error", 0),
         total=summary.get("total", 0),
         duration_ms=round(report.get("duration", 0.0) * 1000, 1),
-        tests=tests,
+        tests=tests,    
         captured_stdout=captured_stdout,
         captured_stderr=captured_stderr,
         log=log,

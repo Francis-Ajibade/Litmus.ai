@@ -4,8 +4,13 @@ from main.new_code import (
     test_spec_from_blueprint,
     generate_tests,
     generate_solution,
-    explain_failure,
+    explain_failure1,
+    run_engine,
+    try_expression,
     LITMUS_MODEL,
+    THINKING_MODEL,
+    TEST_MODEL,
+    EXPLAIN_MODEL,
     MODELS,
 )
 
@@ -15,7 +20,12 @@ __all__ = [
     "test_spec_from_blueprint",
     "generate_tests",
     "generate_solution",
-    "explain_failure",
+    "explain_failure1",
+    "run_engine",
+    "try_expression",
     "LITMUS_MODEL",
+    "THINKING_MODEL",
+    "TEST_MODEL",
+    "EXPLAIN_MODEL",
     "MODELS",
 ]

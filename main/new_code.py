@@ -14,7 +14,11 @@ Model roles:
 Generation is the commodity. Proof and the explanation are the product.
 """
 
+
+from dataclasses import dataclass
+from typing import Any
 import json
+import re
 import os
 import sys
 
@@ -39,6 +43,10 @@ anthropic = OpenAI(
     api_key=os.getenv("ANTHROPIC_API_KEY"),
     base_url="https://api.anthropic.com/v1/",
 )
+openrouter = OpenAI(
+    api_key  = os.getenv('OPENROUTER_API_KEY'),
+    base_url= "https://openrouter.ai/api/v1",
+)
 # --------------------------------------------------------------------------
 # Model → client registry: which provider hosts each code model. `generate_solution`
 # resolves the client from here. One model ships in v0 (LITMUS_MODEL); a second is
@@ -47,17 +55,35 @@ anthropic = OpenAI(
 # --------------------------------------------------------------------------
 
 MODELS: dict[str, OpenAI] = {
-    "gpt-5.1": openai,
+    "o3-mini": openai,
     "claude-opus-4-8": anthropic,
+    # OpenRouter namespaces every id as <org>/<model> — a bare "kimi-k3" is a 404.
+    "moonshotai/kimi-k3" : openrouter,
+    "google/gemini-3.5-flash-lite" : openrouter
+
 }
 
 # Model tiering (CLAUDE.md): a cheap, fast model authors the tests; the
 # expensive models are spent on code candidates. The test suite is the
 # scoreboard — a wrong test silently invalidates every result — so this is the
 # one "cheap" slot where reliability still matters more than price.
-TEST_MODEL = "claude-haiku-4-5-20251001"
-LITMUS_MODEL = "claude-opus-4-8"
-TEST_CLIENT = anthropic
+TEST_MODEL = "o3-mini"
+THINKING_MODEL = "o3-mini"
+LITMUS_MODEL = "moonshotai/kimi-k3"
+# the explainer writes 1-2 sentences — a flash-lite tier is the right size, and
+# ~6x cheaper per output token than the code model.
+EXPLAIN_MODEL = "google/gemini-3.5-flash-lite"
+MAX_ATTEMPTS = 2
+
+@dataclass
+class Result:
+    # SandboxResult is a stdlib dataclass with an @property (all_passed) that
+    # pydantic would drop if it re-parsed it — arbitrary_types_allowed keeps the
+    # real object, property and all.
+    code : str
+    sandbox_result : SandboxResult
+    explain_failure : str | None = None
+
 
 
 def _completion_kwargs(model: str) -> dict:
@@ -69,7 +95,7 @@ def _completion_kwargs(model: str) -> dict:
     return {}
 
 
-def call_model(client: OpenAI, model: str, system: str, user: str) -> str:
+def call_model(client: Any, model: str, system: str, user: str) -> str:
     """One streamed chat completion, returned as a plain string."""
     stream = client.chat.completions.create(
         model=model,
@@ -86,23 +112,50 @@ def call_model(client: OpenAI, model: str, system: str, user: str) -> str:
             response += chunk.choices[0].delta.content or ""
     return response
 
-EXPLAIN_SYSTEM_PROMPT = """You are a debugging tutor for a student. One or more tests just failed against their code.
 
-Explain, briefly and in plain language:
-1. WHY it failed — tied to THIS code and THESE errors, not generic advice.
-2. THE CONCEPT behind the mistake — the transferable idea to carry to the next problem.
+REPAIR_SYSTEM_PROMPT = """You are a senior engineer fixing a bug. Code you wrote failed one or more tests.
 
-Hard rules:
-- If several tests failed, check whether they share ONE root cause and lead with that;
-  don't repeat yourself once per test.
-- Do NOT write the corrected code, the fixed line, or a diff. Revealing the fix is a
-  SEPARATE step, and withholding it here is the point — you are teaching, not solving.
-- You may point at WHERE to look ("compare how pop handles the empty case") but never
-  hand over the answer.
-- No preamble, no "great question", no apologies. Two short paragraphs at most."""
+Your job: fix the underlying LOGIC so the code is correct, then return the complete corrected file.
+
+HARD RULES:
+- Fix the actual cause. NEVER special-case or hardcode a value to make a specific
+  test pass (e.g. `if input == [the test's input]: return [expected]`). That's
+  cheating the test, not fixing the code, and it makes the code worse. If you
+  catch yourself matching the test's exact inputs, stop and fix the real logic.
+- Don't break passing tests to fix failing ones. The whole suite must still pass.
+  Re-read the tests that were already green and make sure your change preserves them.
+- Change only what the failure requires. Don't rewrite working code or add features.
+- Keep the original style and constraints (naming, no banned libraries, type hints
+  — whatever the original followed).
+- If the failure is caused by a wrong TEST rather than wrong code, say so in one
+  line at the top as a comment, then fix the code to match the clearly-intended
+  behaviour — do not edit the test.
+
+Output ONLY the complete corrected Python file. No prose, no markdown fences, no explanation. Just the file."""
 
 
-def explain_failure(code: str, failures: list[dict], problem: str = "") -> str:
+EXPLAIN_FAILURE1 = """ Code just failed some tests. In 1-2 sentences, tell the user plainly WHAT failed 
+and WHY in reagrds to the problem the code is trying to solve  — the actual cause, not just "a test failed." State it as fact, don't quiz, 
+no code, no fences.
+
+You're given: 
+    the code 
+    a list of test cases and tracebacks objects (failing tests) 
+    problem  
+
+"""
+
+# EXPLAIN_FAILURE2= """ You repaired code across versions. Given the facts below, write 1-2 plain 
+# sentences telling the user what improved and what still fails. State facts; 
+# don't quiz. No code.
+
+# v2 fixed these tests that v1 failed: {fixed}
+# v2 still fails: {still_broken}
+# v2 newly broke (were passing in v1):     <- if any, lead with this
+
+#  """
+
+def explain_failure1(code: str, failures: list[dict], problem: str = "") -> str:
     """On failing tests, ask ONE model why they failed + the concept — WITHOUT revealing the fix.
 
     `failures` is a list of failed-test objects: [{"test_name": ..., "error": ...}, ...],
@@ -118,7 +171,26 @@ def explain_failure(code: str, failures: list[dict], problem: str = "") -> str:
         f"CODE:\n{code}\n\n"
         f"{len(failures)} TEST(S) FAILED:\n\n{block}"
     )
-    return call_model(anthropic, LITMUS_MODEL, EXPLAIN_SYSTEM_PROMPT, user)
+    return call_model(MODELS[EXPLAIN_MODEL], EXPLAIN_MODEL, EXPLAIN_FAILURE1, user)
+
+# def explain_failure2(code: str, failures: list[dict], problem: str = "") -> str:
+#     """On failing tests, ask ONE model why they failed + the concept — WITHOUT revealing the fix.
+
+#     `failures` is a list of failed-test objects: [{"test_name": ..., "error": ...}, ...],
+#     so a run with several failures is explained in ONE call (the model can spot a shared
+#     root cause). Reuses call_model; the tutor discipline lives in EXPLAIN_SYSTEM_PROMPT.
+#     Generation is the commodity; the explanation is the product.
+#     """
+#     block = "\n\n".join(
+#         f"FAILING TEST: {f['test_name']}\nERROR:\n{f['error']}" for f in failures
+#     )
+#     user = (
+#         f"PROBLEM:\n{problem or '(not given)'}\n\n"
+#         f"CODE:\n{code}\n\n"
+#         f"{len(failures)} TEST(S) FAILED:\n\n{block}"
+#     )
+#     return call_model(anthropic, LITMUS_MODEL, EXPLAIN_FAILURE2, user)
+
 
 # --------------------------------------------------------------------------
 # Phase 1 — the reasoning agent (blueprint author). No code emitted here.
@@ -132,11 +204,12 @@ Output STRICT JSON and nothing else — no prose, no markdown fences. Exactly th
 
 {
   "problem_definition": "one-paragraph plain-English restatement of the task",
+  "entry_point": "JUST the callable's name, no signature — e.g. 'solve' or 'BoundedStack'. Must match interface_contract.",
   "interface_contract": "the EXACT function name + signature every solution must expose, e.g. 'def solve(data: str) -> str:'. Pin the pure-logic function so pytest can import it. Console I/O (input()/print()) must be confined to `if __name__ == \\"__main__\\":`.",
   "lecturer_traps": ["the specific gotchas a grader would test — the non-obvious edge cases, off-by-ones, format rules"],
   "algorithmic_steps": ["ordered steps to implement the core function"],
   "required_test_cases": [
-    {"description": "what this case checks", "input": "the argument passed to the function", "expected": "the exact expected return value"}
+    {"description": "what this case checks", "input": "the ARGUMENTS exactly as they would appear inside the call parentheses, so that entry_point(<input>) is valid Python. For one argument that is just the value: \\\"'abc'\\\" or \\\"[1,2]\\\". For several, comma-separate them: \\\"{'a':1}, {'b':2}\\\" — do NOT wrap multiple arguments in a list.", "call": "runnable Python that exercises THIS case against the entry point, assuming it is already imported. A plain function is one expression: \\\"solve('100,150,180')\\\". Anything needing setup is several lines ending in the expression under test: \\\"s = BoundedStack(2)\\\\ns.push(1)\\\\ns.push(2)\\\\ns.pop()\\\". Never include imports.", "expected": "the exact expected return value"}
   ],
   "clarifying_question": "the single most important ambiguity for the human to resolve, or empty string if none"
 }
@@ -296,15 +369,72 @@ def blueprint_to_text(bp: dict) -> str:
     return "\n".join(lines)
 
 
-def test_spec_from_blueprint(bp: dict) -> str:
-    """The blueprint's required_test_cases become the TEST_SPEC Haiku implements
-    verbatim — the human already approved exactly these cases in Phase 2."""
+def try_expression(code: str, snippet: str) -> SandboxResult:
+    """Run ONE user-written expression against already-generated code.
+
+    This is NOT verification — nothing is asserted and nothing can pass or fail.
+    It answers 'what does this return', not 'is this correct'. The proof is the
+    real suite; this is a REPL against the same sealed container.
+
+    The driver imports INSIDE the test function on purpose: a module-level import
+    executes solution.py during pytest's collection phase, and output captured
+    there is not attributed to any test, so it never reaches captured_stdout.
+
+    We run the snippet against `vars(solution)` — the module's own namespace —
+    rather than importing one name. That way every top-level name is in scope
+    (functions, classes, custom exceptions), so a class contract like
+    BoundedStack works without us having to guess what to import.
+
+    eval first, exec on fallback: `solve("x")` should print its result without
+    the user wrapping it in print(), which is how the Python prompt behaves.
+    eval raises SyntaxError on statements, and that's the signal to exec instead
+    so multi-step snippets work. The `is not None` guard stops `print(...)` —
+    an expression returning None — from echoing a stray None afterwards.
+
+    The snippet is embedded with !r so quotes and newlines survive intact.
+    """
+    driver = (
+        "def test_try():\n"
+        "    import ast, solution\n"
+        "    ns = vars(solution)\n"
+        f"    snippet = {snippet!r}\n"
+        "    tree = ast.parse(snippet)\n"
+        "    last = tree.body[-1] if tree.body else None\n"
+        "    if isinstance(last, ast.Expr):\n"
+        "        exec(compile(ast.Module(tree.body[:-1], []), '<try>', 'exec'), ns)\n"
+        "        value = eval(compile(ast.Expression(last.value), '<try>', 'eval'), ns)\n"
+        "        if value is not None:\n"
+        "            print(value)\n"
+        "    else:\n"
+        "        exec(snippet, ns)\n"
+    )
+    return run_in_sandbox(solution_code=code, test_code=driver)
+
+
+def test_spec_from_blueprint(bp: dict) -> tuple[list[dict], str]:
+    """Two views of the SAME cases, for two different consumers.
+
+    The string is what the test model implements verbatim — the human approved
+    exactly these cases in Phase 2. The list is those cases untouched, so the UI
+    can read description/input as fields instead of parsing them back out of the
+    formatted text. `lines` is derived from `cases`, so the two can't disagree.
+    """
     contract = bp.get("interface_contract", "")
-    cases = [
+    cases = bp.get("required_test_cases", [])
+    if not cases:
+        # The suite IS the scoreboard. With no spec the test model invents its own
+        # cases, and "verified" silently stops meaning anything — the worst kind of
+        # failure, because everything still goes green. An empty list is a blueprint
+        # failure, so say so here rather than improvising downstream.
+        raise ValueError(
+            "Blueprint produced no required_test_cases — refusing to let the test "
+            "model invent the suite."
+        )
+    lines = [
         f"- {c.get('description','')}: input={c.get('input','')!r}, expected={c.get('expected','')!r}"
-        for c in bp.get("required_test_cases", [])
+        for c in cases
     ]
-    return f"INTERFACE: {contract}\n\nCASES (implement exactly these):\n" + "\n".join(cases)
+    return cases, f"INTERFACE: {contract}\n\nCASES (implement exactly these):\n" + "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
@@ -359,7 +489,7 @@ Return the raw contents of test_solution.py."""
 
 
 def test_user_prompt(problem: str, test_spec: str) -> str:
-    return f"PROBLEM:\n{problem}\n\nTEST_SPEC:\n{test_spec or '(empty — derive the suite yourself)'}"
+    return f"PROBLEM:\n{problem}\n\nTEST_SPEC:\n{test_spec}"
 
 
 DEFAULT_PROBLEM = """Write a program that calculates and prints the value according to the given formula: \
@@ -393,7 +523,7 @@ def generate_tests(problem: str, test_spec: str) -> str:
     """One cheap model turns an approved TEST_SPEC into the pytest file every
     candidate is judged against. The SPEC comes from the human-approved blueprint
     (or the user's own cases) — Haiku implements it, it doesn't invent it."""
-    raw = call_model(TEST_CLIENT, TEST_MODEL, TEST_SYSTEM_PROMPT, test_user_prompt(problem, test_spec))
+    raw = call_model(MODELS[TEST_MODEL], TEST_MODEL, TEST_SYSTEM_PROMPT, test_user_prompt(problem, test_spec))
     return strip_code_fences(raw)
 
 
@@ -404,38 +534,84 @@ def generate_solution(model: str, blueprint_text: str, style: str) -> str:
     )
     return strip_code_fences(raw)
 
+def repair_code(problem, prev_code : str, tests : str, results : SandboxResult) -> str:
+    # problem     → what "correct" means (anti-special-casing anchor)
+    # prev_code   → the thing being fixed
+    # test_suite  → ALL tests, so it preserves the green ones
+    # failures    → per-test tracebacks of the red ones (the .message fields)) -> SandboxResult :
+
+    block = "\n\n".join(
+        f"test_name : {f['name']}\n outcome : {f['outcome']}\n stdout:{f['stdout']}\n traceback :\n{f['message']}" for f in results.tests
+    )
+
+    user = (
+        f"PROBLEM:\n{problem}\n\n"
+        f"CODE:\n{prev_code}\n\n"
+        f"THE ENTIRE TEST SUITE (keep the passing tests passing):\n{tests}\n\n"
+        f"RESULTS — {results.passed}/{results.total} passed:\n\n{block}"
+    )
+
+    repaired_code = call_model(MODELS[LITMUS_MODEL], LITMUS_MODEL, REPAIR_SYSTEM_PROMPT, user)
+    return strip_code_fences(repaired_code)
+
+
 
 # NOTE: the Litmus loop (blueprint -> tests -> one-model codegen -> sandbox ->
 # explain) goes here next as run_litmus(). No race, no leaderboard, no DB.
 
-def run_litmus(problem: str = DEFAULT_PROBLEM, style: str = DEFAULT_STYLE) -> SandboxResult:
+#interface for the web app 
+def run_engine(problem: str , style : str, blueprint : dict) -> tuple[str, list[dict], list[Result]]:
+
+    solution = generate_solution(LITMUS_MODEL, blueprint_to_text(blueprint), style)
+    # `cases` is the list the UI renders; `test_spec` is the flattened prompt text.
+    cases, test_spec =  test_spec_from_blueprint(blueprint)
+    tests = generate_tests(problem, test_spec)
+
+    # 3. Run in sandbox with repair loop 
+        #1 define the loop 
+        # first attempot tun the code 
+    original_result = run_in_sandbox(solution_code=solution, test_code=tests)
+    attempts = 0
+    # record v1 up front — so a clean first pass still returns a Result, not []
+    results = [Result(code=solution, sandbox_result=original_result)]
+        # if result.all passed retun the result class else repair 
+    while not original_result.all_passed and attempts < MAX_ATTEMPTS - 1:
+        #explain result 
+        failed_tests = [
+                {"test_name":t['name'], "error" : t['message']
+                } for t in original_result.tests if t['outcome']!= "passed" ]
+        # explain WHY this version failed, attached to the version that failed
+        results[-1].explain_failure = explain_failure1(solution, failures=failed_tests, problem=problem)
+        # repair — aware of the whole suite so it keeps the green tests green
+        solution = repair_code(problem=problem, prev_code=solution, tests=tests, results=original_result)
+        original_result = run_in_sandbox(solution_code=solution, test_code=tests)
+        results.append(Result(code=solution, sandbox_result=original_result))
+        attempts += 1
+
+    # the final version still failing? explain it too (the earlier version was
+    # explained inside the loop, before it got repaired).
+    if not original_result.all_passed:
+        final_failed = [
+            {"test_name": t['name'], "error": t['message']}
+            for t in original_result.tests if t['outcome'] != "passed"
+        ]
+        results[-1].explain_failure = explain_failure1(solution, failures=final_failed, problem=problem)
+
+    return (tests, cases, results)
+    
+# interface for the terminal side 
+def run_litmus(problem: str = DEFAULT_PROBLEM, style: str = DEFAULT_STYLE) -> tuple[str, list[Result]]:
     """The v0 core loop: blueprint â tests â one-model codege
 
     Prints progress and the verdict to the terminal; returns
     so a future API caller can render it. One model (LITMUS_MODEL) throughout.
     """
+
     # 1. Analyze + human-approve a locked blueprint (Phase 1+2 already do this).
-    bp = review_blueprint(client=MODELS[LITMUS_MODEL], model = LITMUS_MODEL, problem=problem, style=style )
+    bp = review_blueprint(client=MODELS[THINKING_MODEL], model = THINKING_MODEL, problem=problem, style=style )
+    return run_engine(problem, style, bp)
 
-    # 2. From the locked blueprint, build (a) the code model'
-    #    (b) the test spec, then author both files.
-    solution = generate_solution(LITMUS_MODEL, blueprint_to_text(bp), style)
-    test_spec =  test_spec_from_blueprint(bp)
-    tests = generate_tests(problem, test_spec)
-
-    # 3. Run the solution against the tests in the sandbox.
-    result = run_in_sandbox(solution_code=solution, test_code=tests)
-
-    # 4. The branch. If every test passed, print the receipt
-    if result.all_passed:
-        # print pass count / "done"
-        return result
-
-    # 5. Something failed. Adapt the failures, ask ONE model WHY (+ concept),
-    #    print the explanation. Do NOT print the fix.
-    failed_tests = [{"test_name":t['name'], "error" : t['message']} for t in result.tests if t['outcome']!= "passed" ] 
-    explain_failure(solution, failures=failed_tests, problem=problem)
-    return result
+    
 
 
 if __name__ == "__main__":

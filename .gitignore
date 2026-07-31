@@ -15,12 +15,17 @@ __pycache__/
 # JS (frontend, later)
 node_modules/
 
+
 # Private — kept LOCAL, never published (docs, mockups, drafts, tooling)
-CLAUDE.md
-PRD.md
-CLAUDE-3.md
-PRD-3.md
-coderace-ui-mockup.html
-coderace-waitlist.html
-coderace-landing-lovable.html
+# Every .md is private except the READMEs. Neither pattern has a slash, so both
+# match at ANY depth — which is exactly what keeps web/README.md publishable
+# while CLAUDE-4.md and PRD-4.md at the root stay hidden.
+*.md
+!README.md
+
+#SLASH anchors this to the repo root, so web/index.html — Vite's entry point,
+# without which the frontend cannot build — is never matched.
+/*.html
+
+# Local Claude Code config — settings and permissions, not project source.
 .claude/

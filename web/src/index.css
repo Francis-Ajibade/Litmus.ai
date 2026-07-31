@@ -4,14 +4,31 @@
 
 :root{
   --bg:#08080a;
-  --panel:#0e0e13; --line:#22222b;
+  --panel:#111116; --panel-2:#16161b; --panel-3:#1b1b22;
+  --line:#2a2a33; --line-soft:#1e1e26;
   --text:#e9e9ef; --muted:#8a8a99; --faint:#5a5a68;
-  --violet:#8b5cf6; --indigo:#4338ca; --magenta:#c026d3;
+  --violet:#8b5cf6; --violet-dim:#6d4dc4; --indigo:#4338ca; --magenta:#c026d3;
   --green:#3fb950; --red:#f85149; --amber:#d9a441;
   --glass:rgba(20,20,26,.55); --glass-line:rgba(255,255,255,.09);
+  /* Secondary copy that still has to read as DESIGNED, not as leftover chrome.
+     --faint (#5a5a68) is a muddy blue-grey: it dims by desaturating, which is
+     what makes it look washed out rather than quiet. This dims the SAME white
+     as --text by dropping its alpha instead, so the colour stays neutral and
+     the text reads crisp at low emphasis. */
+  --tip:rgba(233,233,239,.60);
   --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 }
+
+/* the idle sandbox: a sealed box with a scan line sweeping down it */
+.scanbox{position:relative;overflow:hidden;}
+.scanbox::after{
+  content:'';position:absolute;left:0;right:0;height:34%;
+  background:linear-gradient(180deg,transparent,rgba(139,92,246,.20),transparent);
+  animation:scan 2.1s ease-in-out infinite;
+}
+@keyframes scan{0%{top:-34%}100%{top:100%}}
+@media (prefers-reduced-motion:reduce){.scanbox::after{animation:none}}
 
 .glow::before {
   content: '';
@@ -47,3 +64,136 @@
 }
 .honest p{font-size:13.5px;color:var(--muted);line-height:1.7}
 .honest p + p{margin-top:9px}
+
+/* ---------- horizontal pipeline bar: the line fills left→right into each step ---------- */
+.pipe { display:flex; align-items:center; flex-wrap:wrap; list-style:none; margin:0; padding:0; }
+.pstep { display:flex; align-items:center; }
+/* the leading leg before each bead — a grey track with a coloured fill that grows across */
+.connector{
+  width:22px; height:2px; border-radius:2px; margin:0 8px;
+  background:var(--line-soft); overflow:hidden; position:relative;
+}
+.connector .fill{
+  position:absolute; left:0; top:0; height:100%; width:0;
+  background:var(--violet); transition: width .5s ease-in, background .35s ease;
+}
+.item{
+  display:grid; place-items:center; width:22px; height:22px; border-radius:50%;
+  transition: box-shadow .35s ease;
+}
+.icon{
+  display:grid; place-items:center; width:22px; height:22px; border-radius:50%;
+  border:1.5px solid var(--line); background:var(--panel);
+  color:var(--faint); font-family:var(--mono); font-size:11px;
+  /* +.35s delay so the line arrives first, THEN the bead lights */
+  transition: background .3s ease .35s, border-color .3s ease .35s, color .3s ease .35s;
+}
+.label{
+  font-family:var(--mono); font-size:13px; color:var(--faint); margin-left:8px;
+  transition: color .3s ease .35s;
+}
+
+/* active — leg fills violet, bead lights a beat later */
+.pstep[data-state="active"] .fill  { width:100%; }
+.pstep[data-state="active"] .icon  { background:var(--violet); border-color:var(--violet); color:#fff; }
+.pstep[data-state="active"] .item  { box-shadow:0 0 0 4px rgba(139,92,246,.12); }
+.pstep[data-state="active"] .label { color:var(--text); }
+
+/* done — leg stays filled, bead becomes a green check */
+.pstep[data-state="done"] .fill  { width:100%; }
+.pstep[data-state="done"] .icon  { background:transparent; border-color:var(--green); color:var(--green); }
+.pstep[data-state="done"] .label { color:var(--faint); }
+
+/* revising — the leg + bead ease to amber (the transitions above carry it) */
+.pstep[data-state="revising"] .fill  { width:100%; background:var(--amber); }
+.pstep[data-state="revising"] .icon  { border-color:var(--amber); color:var(--amber); }
+.pstep[data-state="revising"] .item  { box-shadow:0 0 0 4px rgba(217,164,65,.12); }
+.pstep[data-state="revising"] .label { color:var(--amber); }
+
+/* the Repair / Re-verify branch reads amber, not violet, wherever it's shown */
+.pstep[data-branch="repair"][data-state="active"] .icon,
+.pstep[data-branch="repair"][data-state="done"]   .icon  { border-color:var(--amber); color:var(--amber); background:var(--panel); }
+.pstep[data-branch="repair"][data-state="active"] .fill,
+.pstep[data-branch="repair"][data-state="done"]   .fill  { background:var(--amber); }
+.pstep[data-branch="repair"][data-state="active"] .label,
+.pstep[data-branch="repair"][data-state="done"]   .label { color:var(--amber); }
+
+/* ---------- litmus messages fade in ---------- */
+@keyframes fadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+.fade-in { animation: fadeIn .45s ease both; }
+
+/* ---------- the "model is thinking" ellipsis ---------- */
+.dots { display:inline-flex; gap:5px; align-items:center; }
+.dots i { width:5px; height:5px; border-radius:50%; background:var(--faint); animation: dotPulse 1.2s ease-in-out infinite; }
+.dots i:nth-child(2){ animation-delay:.16s; }
+.dots i:nth-child(3){ animation-delay:.32s; }
+@keyframes dotPulse { 0%,100%{ opacity:.25; transform:translateY(0); } 50%{ opacity:1; transform:translateY(-1px); } }
+
+@media (prefers-reduced-motion:reduce){
+  .connector .fill, .item, .icon, .label { transition:none; }
+  .fade-in, .dots i, .pulse-ring::after { animation:none; }
+}
+
+/* ---------- the litmus avatar's violet pulse ----------
+   A ring that expands and fades OUT of the badge. It's a ::after rather than a
+   box-shadow so it can scale past the 17px badge without pushing layout — the
+   pseudo-element is absolutely positioned, so nothing around it moves. */
+.pulse-ring { position:relative; }
+.pulse-ring::after{
+  content:''; position:absolute; inset:-2px; border-radius:50%;
+  border:1.5px solid var(--violet); pointer-events:none;
+  animation: pulseRing 2s cubic-bezier(.2,.7,.3,1) infinite;
+}
+@keyframes pulseRing{
+  0%   { transform:scale(.9);  opacity:.85 }
+  70%  { opacity:0 }
+  100% { transform:scale(1.6); opacity:0 }
+}
+
+/* ---------- the "test" button on a case row ----------
+   The row already publishes --accent as an inline style (grey when there's no
+   matching pytest row, green when it passed, red when it failed), so this
+   button just READS that variable — the halo is automatically the right colour
+   for the row it belongs to, with no branching here at all.
+
+   color-mix is what makes that possible: it derives the translucent halo from
+   the same variable. Without it every accent would need a hand-written rgba
+   twin, and the two would drift the first time a colour changed.
+
+   opacity is in the transition list even though the reveal is Tailwind's job.
+   Everything in index.css is UNLAYERED, and an unlayered rule outranks every
+   cascade layer — so this shorthand overwrites Tailwind transition-opacity
+   utility outright, and the button would snap into view instead of fading.
+   Declaring opacity here keeps both transitions alive from the one rule. */
+.case-run{
+  transition: color .18s ease, border-color .18s ease, opacity .2s ease,
+              background-color .18s ease, box-shadow .3s ease;
+}
+.case-run:hover{
+  color:var(--accent);
+  border-color:color-mix(in srgb, var(--accent) 55%, transparent);
+  background:color-mix(in srgb, var(--accent) 12%, transparent);
+  /* two shadows: a tight ring that reads as an edge, and a wide soft one that
+     reads as light thrown onto the panel behind it */
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
+             0 0 14px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+/* ---------- code highlighting ----------
+   highlight.js only TAGS the tokens — it ships no colours unless you import one
+   of its stock themes. We skip those and colour the classes ourselves, so the
+   code panel uses this app's palette instead of fighting it. */
+:root{
+  --code-key:#a78bfa;   /* def / while / if / return */
+  --code-fn:#7aa2f7;    /* function + class names */
+  --code-str:#8fd67a;
+  --code-num:#4fd1c5;
+}
+.hljs-keyword, .hljs-literal, .hljs-built_in, .hljs-type { color:var(--code-key); }
+.hljs-title, .hljs-title.function_, .hljs-title.class_   { color:var(--code-fn); }
+.hljs-string, .hljs-meta .hljs-string                    { color:var(--code-str); }
+.hljs-number                                             { color:var(--code-num); }
+.hljs-comment                                            { color:var(--faint); font-style:italic; }
+.hljs-params, .hljs-variable                             { color:var(--text); }
+.hljs-operator, .hljs-punctuation, .hljs-attr            { color:var(--muted); }
+
