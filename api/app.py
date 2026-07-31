@@ -32,7 +32,14 @@ app = FastAPI(title="Litmus API")
 # the Vite origin. (We'll tighten this to the real domain in production.)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://127.0.0.1:5173",
+         "https://litmus-ai.org",
+          "https://litmus-ai-ruby.vercel.app"
+        
+        ],
+        
     allow_methods=["*"],
     allow_headers=["*"],
 )

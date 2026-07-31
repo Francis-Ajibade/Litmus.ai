@@ -384,9 +384,8 @@ export default function Litmus(){
 
     function sendTestinput(i : TestCase){
         setMessages(m => [...m, 
-            {role : 'user', text :`test ${i.description} with input ${i.input}`},
-            {role : 'litmus', text : `i see you are trying to test the test case ${i.description}  with the input ${i.input} make sure you replace the values as you may wish`}
-        ])
+            {role : 'user', text :`Test ${i.description} with input ${i.input}`},
+            {role : 'litmus', text : `Loaded "${i.description}" into the composer below. Change the input to anything you want to try, then hit Run — the result appears in the Console tab.`},])
         // `call` is written BY the model that wrote the case, so it always
         // matches — including multi-step ones like a stack push/pop sequence,
         // which entry_point(input) can't express at all. The assembly below is
