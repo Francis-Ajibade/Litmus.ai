@@ -105,6 +105,29 @@ type Msg = {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// fetch only rejects on a NETWORK-level failure (DNS, refused connection, CORS).
+// A 429 is a perfectly successful round-trip, so nothing throws on its own —
+// checking response.ok and throwing is what routes it into the catch blocks.
+// Returning `never` tells TS this always throws, so callers don't need `throw`
+// in front of it and the code after the if-block still narrows correctly.
+// Instead of finishing normally, a function with a never type will always crash, stop the program, or run forever.
+function throwForStatus(response: Response, label: string): never {
+    if (response.status === 429) {
+        // Seconds remaining, set by slowapi's 429 handler. This is only readable
+        // because the API lists Retry-After in the CORS expose_headers — without
+        // that the browser strips it and .get() returns null.
+        const seconds = Number(response.headers.get('Retry-After'))
+        const minutes = Math.ceil(seconds / 60)
+        const wait =
+            !Number.isFinite(seconds) || seconds <= 0 ? 'a little while'
+            : seconds < 60 ? 'under a minute'
+            : `about ${minutes} minute${minutes === 1 ? '' : 's'}`
+        // Deliberately not "today" — every limit on this API is per hour.
+        throw new Error(`You've hit the usage limit. Try again in ${wait}.`)
+    }
+    throw new Error(`${label} (${response.status})`)
+}
+
 // How long the bar sits on "Generate" before flipping to "Verify". This is a
 // guess, not a measurement — the backend returns once, at the end. Tune it after
 // timing a real run: generation is the long pole, the sandbox is only seconds.
@@ -217,7 +240,7 @@ export default function Litmus(){
             })
 
             if(!response.ok){
-                throw new Error(`Blueprint request failed (${response.status})`);
+                throwForStatus(response, 'Blueprint request failed');
             }
             const data = await response.json();
             setBlueprint(data)
@@ -248,7 +271,7 @@ export default function Litmus(){
                 })
             })
             if(!response.ok){
-                throw new Error(`Run failed (${response.status})`);
+                throwForStatus(response, 'Run failed');
             }
             const data  = await response.json();
             setResult(data);
@@ -279,7 +302,7 @@ export default function Litmus(){
                     expression,
                 }),
             })
-            if (!response.ok) throw new Error(`Try failed (${response.status})`)
+            if (!response.ok) throwForStatus(response, 'Try failed')
             const data: TryEntry = await response.json()
             setTryLog(l => [...l, data])
             setProblem('')          // clear the draft, keep the log
