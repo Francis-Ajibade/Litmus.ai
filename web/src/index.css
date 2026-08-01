@@ -131,7 +131,36 @@
 
 @media (prefers-reduced-motion:reduce){
   .connector .fill, .item, .icon, .label { transition:none; }
-  .fade-in, .dots i, .pulse-ring::after { animation:none; }
+  .fade-in, .dots i, .pulse-ring::after, .brand-mark::after { animation:none; }
+}
+
+/* ---------- the header mark's gloss sweep ----------
+   A band of light travelling across the logo. The trick is the MASK: without it
+   the gradient would sweep across the element's square box, so you'd see a lit
+   rectangle passing over the transparent corners instead of a shine on the mark.
+   Masking with the same SVG clips the highlight to the mark's silhouette, so
+   only the glyph itself catches the light.
+
+   The mask is a SHAPE, not a picture — the browser keeps the alpha channel and
+   throws the colour away, which is why the band shows through as white rather
+   than as a second violet mark. */
+.brand-mark { position:relative; display:inline-block; width:20px; height:20px; }
+.brand-mark img { width:100%; height:100%; display:block; }
+.brand-mark::after{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(105deg,
+    transparent 42%, rgba(255,255,255,.9) 50%, transparent 58%);
+  background-size:250% 100%;
+  -webkit-mask:url(/favicon.svg) center / contain no-repeat;
+          mask:url(/favicon.svg) center / contain no-repeat;
+  animation: brandSheen 5s ease-in-out infinite;
+}
+/* Most of the cycle is the hold at the start — the sweep itself is ~1.2s of the
+   5s. A shine that runs continuously reads as a loading state; one that fires
+   occasionally reads as a surface catching the light. */
+@keyframes brandSheen{
+  0%, 76% { background-position:200% 0; }
+  100%    { background-position:-60% 0; }
 }
 
 /* ---------- the litmus avatar's violet pulse ----------

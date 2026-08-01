@@ -504,7 +504,13 @@ export default function Litmus(){
             <aside className="flex flex-col min-w-0 min-h-0 border-r border-[var(--line)] bg-[var(--panel)]">
 
                 {/* header — fixed */}
-                <header className="shrink-0 flex items-center gap-3 px-4 py-3.5 border-b border-[var(--line-soft)]">
+                <header className="shrink-0 flex items-center gap-2.5 px-4 py-3.5 border-b border-[var(--line-soft)]">
+                    {/* alt="" on purpose: the wordmark right next to it already
+                        says "litmus", so naming the image too would make a screen
+                        reader announce the brand twice. */}
+                    <span className="brand-mark">
+                        <img src="/favicon.svg" alt="" />
+                    </span>
                     <span className="font-mono font-semibold text-[15px]">litmus
                         <span className="text-[var(--violet)]">.</span>
                     </span>
