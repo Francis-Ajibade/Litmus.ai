@@ -151,6 +151,10 @@
   background:linear-gradient(105deg,
     transparent 42%, rgba(255,255,255,.9) 50%, transparent 58%);
   background-size:250% 100%;
+  /* Without this the gradient TILES. The band parks off-screen during the hold,
+     but at 250% the pattern repeats every 2.5x the width — so the next tile sits
+     right on the mark and looks like a frozen highlight that never leaves. */
+  background-repeat:no-repeat;
   -webkit-mask:url(/favicon.svg) center / contain no-repeat;
           mask:url(/favicon.svg) center / contain no-repeat;
   animation: brandSheen 5s ease-in-out infinite;
@@ -160,7 +164,7 @@
    occasionally reads as a surface catching the light. */
 @keyframes brandSheen{
   0%, 76% { background-position:200% 0; }
-  100%    { background-position:-60% 0; }
+  100%    { background-position:-100% 0; }
 }
 
 /* ---------- the litmus avatar's violet pulse ----------
