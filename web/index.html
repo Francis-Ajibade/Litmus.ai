@@ -2,8 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- ?v=2 busts the cache. Browsers hold on to favicons far more stubbornly
+         than any other asset — without a changed URL the old bolt can survive a
+         hard refresh, a redeploy, and a restart, which reads as "my change
+         didn't work" when it did. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08080a" />
     <title>Litmus ai</title>
   </head>
   <body>
