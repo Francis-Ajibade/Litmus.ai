@@ -1,6 +1,6 @@
 
 import Litmus from "./components/Litmus/Litmus"
-
+import { Analytics } from "@vercel/analytics/react"
 function App() {
   // The page shell: dark background (mockup --bg #08080a), light text
   // (--text #e9e9ef), and a centered max-width column that everything lives in
@@ -31,6 +31,7 @@ function App() {
 
       <div className="relative z-2">
           <Litmus />
+          <Analytics />
       </div>
     </div>
   )
