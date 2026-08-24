@@ -8,6 +8,13 @@
          didn't work" when it did. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Starts the font download alongside the HTML instead of after the CSS has
+         parsed and found the @font-face. Without it the hero headline paints in
+         the fallback and visibly re-flows mid-typewriter, which is the one place
+         on the page a swap would be obvious.
+         crossorigin is REQUIRED on font preloads even for same-origin files —
+         omit it and the browser fetches the font twice. -->
+    <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="theme-color" content="#08080a" />
     <title>Litmus ai</title>
   </head>
