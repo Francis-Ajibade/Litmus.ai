@@ -29,3 +29,8 @@ node_modules/
 
 # Local Claude Code config — settings and permissions, not project source.
 .claude/
+
+# Design mockups and canvas exports. Private working material, and
+# litmus-surface-flow.html alone is 2.3MB — git keeps a blob forever once it
+# lands, so these stay out of history rather than being cleaned up later.
+design/
