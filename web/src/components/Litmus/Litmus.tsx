@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import Pipeline from "./Pipeline";
 import Results from "./Results";
 import BlueprintPanel, { type Blueprint } from "./Blueprint";
 
@@ -195,6 +194,22 @@ export default function Litmus(){
     // inputs is only useful if you can compare them.
     const [tryLog, setTryLog] = useState<TryEntry[]>([])
     const [trying, setTrying] = useState(false)
+    // submit is a network call now, so it needs its own in-flight flag — `busy` is
+    // derived from stage, and this check happens while the stage is still 'idle'.
+    const [checking, setChecking] = useState(false)
+
+    // ── layout ────────────────────────────────────────────────────────────
+    // Three states, not a boolean: the thread alone, both panes, or the sandbox
+    // alone. `null` means "follow the stage" — the override exists only to let
+    // someone disagree with the automatic choice for as long as that stage lasts.
+    const [layoutOverride, setLayoutOverride] = useState<'thread' | 'split' | 'sandbox' | null>(null)
+    const [leftPct, setLeftPct] = useState(42)
+    const [dragging, setDragging] = useState(false)
+    // True while the cursor is within a few pixels of the right edge. The edge is
+    // the affordance: there is no divider to grab in full-page mode, so the page
+    // has to volunteer that one is available.
+    const [edgeHot, setEdgeHot] = useState(false)
+    const shellRef = useRef<HTMLDivElement>(null)
     const [feedback, setFeedback] = useState('')
     // <RunResult | null>TypeScript generic – the state can be either a RunResult or null(
     // (null)Initial value – the state starts as null
@@ -242,10 +257,24 @@ export default function Litmus(){
             if(!response.ok){
                 throwForStatus(response, 'Blueprint request failed');
             }
+
             const data = await response.json();
+
+            if (data.declined  == true ) {
+                setStage('idle')
+                setMessages(m => [...m,
+                    { role: 'user',   text: lockedProblem },
+                    { role: 'litmus', text: data.message,
+                    },
+                ])
+            }
+
+            else{
             setBlueprint(data)
             setStage('blueprint')   // success has its own destination
             setFeedback('')         // consumed — clear it so the next revise starts empty
+            }
+            
         }catch(err){
             console.log(err);
             setErrorMsg (err instanceof Error ? err.message: "something went wrong");
@@ -272,6 +301,7 @@ export default function Litmus(){
             })
             if(!response.ok){
                 throwForStatus(response, 'Run failed');
+
             }
             const data  = await response.json();
             setResult(data);
@@ -327,11 +357,52 @@ export default function Litmus(){
     const composingStyle = stage === 'awaiting_style'
 
 
-    // Step 1: commit the problem, then ASK about style before spending a model call.
-    // Nothing is generated here — the blueprint waits until style is settled, so it
-    // gets written once with the right instructions instead of twice.
-    function submitProblem(){
-        if (!problem.trim() || busy) return
+    // Step 1: check the input is even a coding problem, then commit it and ASK about
+    // style before spending a model call. Nothing is generated here — the blueprint
+    // waits until style is settled, so it gets written once with the right
+    // instructions instead of twice.
+    //
+    // The check has to happen HERE and not deeper in the pipeline. Everything below
+    // this line is local state: the style question costs nothing and reaches no
+    // model, so a guard further in would still have asked someone how they'd like
+    // their weather question formatted before turning them away.
+    async function submitProblem(){
+        if (!problem.trim() || busy || checking) return
+
+        setErrorMsg('')
+        setChecking(true)
+        let declined: { message?: string } | null = null
+        try {
+            const response = await fetch(`${API_URL}/api/check`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ problem }),
+            })
+            // Fails open, exactly like the backend does: if the checker is
+            // unreachable the submission proceeds unguarded rather than stranding
+            // someone with a real question behind a service they can't see.
+            if (response.ok) {
+                const data = await response.json()
+                if (data.declined) declined = data
+            }
+        } catch (err) {
+            console.log('check unavailable, proceeding:', err)
+        } finally {
+            setChecking(false)
+        }
+
+        if (declined) {
+            // A decline is something Litmus SAYS, not an error — errorMsg would
+            // paint failure chrome on a perfectly reasonable off-topic question.
+            setMessages(m => [...m, {
+                role: 'litmus',
+                text: declined.message ?? 'I help with coding problems — try pasting a coding question, an assignment, or the code that\'s breaking.',
+            }])
+            // No stage change and no setProblem(''): nothing was committed, so the
+            // composer keeps their text to edit instead of making them retype it.
+            return
+        }
+
         setLockedProblem(problem)
         setMessages(m => [...m,
             { role: 'user',   text: problem },
@@ -465,27 +536,10 @@ export default function Litmus(){
         return () => clearInterval(id)
     }, [thinking, phaseKey])
 
-    // the status light in the top-right of the bar (replaces the old status text):
-    // idle grey, working green (pulsing), revise/repair amber (pulsing), done green.
-    const statusDot =
-          stage === 'idle'      ? { c: 'bg-[var(--faint)]', pulse: false }
-        : stage === 'done'      ? { c: 'bg-[var(--green)]',  pulse: false }
-        : stage === 'blueprint' ? { c: 'bg-[var(--violet)]', pulse: false }
-        : (stage === 'repairing' || (stage === 'planning' && blueprint))
-                                ? { c: 'bg-[var(--amber)]',  pulse: true }
-        :                         { c: 'bg-[var(--green)]',  pulse: true }
-
-    // the thin accent line on top of the bar — colour tracks the stage
-    const topLine =
-          stage === 'idle'                      ? 'bg-[var(--line-soft)]'
-        : stage === 'done'                      ? 'bg-[var(--green)]'
-        : (stage === 'planning' && blueprint)   ? 'bg-[var(--amber)]'
-        :                                         'bg-[var(--violet)]'
-
-    // did the run take a repair attempt? drives whether Repair/Re-verify show.
-    // Brick 3/4 will set this from the real attempts; false until the engine exists.
-    // (flip to `true` temporarily to preview the full 5-step bar.)
-    const repaired = (result?.attempts.length ?? 0) > 1
+    // statusDot / topLine / repaired lived here to drive the old pipeline bar.
+    // The pane's own border is the status light now (paneAccent above), so the
+    // three of them had one consumer between them and it is gone. Pipeline.tsx is
+    // still on disk — unused by this component, kept for the rebuild.
 
     // Resolve "null means the latest" ONCE, here. Both the header and <Results>
     // read this same index, so the convention lives in exactly one line and the
@@ -493,18 +547,113 @@ export default function Litmus(){
     const shownIndex = selected ?? (result ? result.attempts.length - 1 : 0)
     const shown = result?.attempts[shownIndex]
 
+    // The sandbox earns its half of the screen only once there is code to put in
+    // it. Everything before that — the problem, the style question, the blueprint
+    // — is conversation, and conversation reads better across the full width than
+    // squeezed into a rail beside an empty panel.
+    const codeStage = stage === 'generating' || stage === 'verifying'
+                   || stage === 'repairing'  || stage === 'done'
+    const autoLayout: 'thread' | 'split' = codeStage ? 'split' : 'thread'
+    const layout = layoutOverride ?? autoLayout
+
+    // Drop the override whenever the automatic answer changes. That is what makes
+    // "ask a new problem and the blueprint takes the whole page again" free: the
+    // stage returns to a thread stage and the override clears with it. WITHIN a
+    // stage the override survives, so a minimised sandbox stays minimised.
+    useEffect(() => { setLayoutOverride(null) }, [autoLayout])
+
+    // Percentages, not pixels: the split has to survive a window resize, and a
+    // fixed 352px rail is half the screen on a laptop and a sliver on a 4K.
+    const cols = layout === 'thread'  ? '1fr 0px 0px'
+               : layout === 'sandbox' ? '0px 0px 1fr'
+               :                        `${leftPct}% 6px 1fr`
+
+    // Cheap enough to run on every move: one subtraction and a comparison, and
+    // setState only fires when the boolean actually flips.
+    function trackEdge(e: React.PointerEvent<HTMLDivElement>) {
+        if (layout !== 'thread' || !shellRef.current) return
+        const rect = shellRef.current.getBoundingClientRect()
+        setEdgeHot(rect.right - e.clientX < 28)
+    }
+
+    // The pane's edge colour IS the status readout. One variable, published as an
+    // inline custom property, so the CSS never branches on stage.
+    const paneAccent =
+          stage === 'repairing'                 ? 'var(--amber)'
+        : stage === 'done' && shown             ? (shown.result.all_passed ? 'var(--green)' : 'var(--red)')
+        : stage === 'idle'                      ? 'var(--line)'
+        :                                         'var(--violet)'
+    // "working" breathes, "lit" holds. Anything mid-flight breathes.
+    const paneWorking = stage === 'planning' || stage === 'generating'
+                     || stage === 'verifying' || stage === 'repairing'
+    const paneLit = stage === 'done' || stage === 'blueprint'
+
+    // Which copy button just fired, so the label can confirm it. Null after 1.4s —
+    // a confirmation that never clears stops being a confirmation.
+    const [copied, setCopied] = useState<'code' | 'tests' | null>(null)
+    async function copy(what: 'code' | 'tests') {
+        const text = what === 'code' ? shown?.code : result?.tests
+        if (!text) return
+        await navigator.clipboard.writeText(text)
+        setCopied(what)
+        setTimeout(() => setCopied(c => (c === what ? null : c)), 1400)
+    }
+
+    // The header only frosts once there is something behind it to frost.
+    const [threadScrolled, setThreadScrolled] = useState(false)
+
+    function startDrag(e: React.PointerEvent<HTMLDivElement>) {
+        e.preventDefault()
+        // Pointer capture keeps the drag alive when the cursor outruns the 6px
+        // handle — without it the divider drops the moment you move quickly.
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDragging(true)
+    }
+    function onDrag(e: React.PointerEvent<HTMLDivElement>) {
+        if (!dragging || !shellRef.current) return
+        const rect = shellRef.current.getBoundingClientRect()
+        const pct = ((e.clientX - rect.left) / rect.width) * 100
+        // Clamped so neither pane can be dragged into uselessness.
+        setLeftPct(Math.min(72, Math.max(24, pct)))
+    }
+    function endDrag(e: React.PointerEvent<HTMLDivElement>) {
+        setDragging(false)
+        e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+
     return(
         //352px: The first column stays locked at a fixed width of 352 pixels (great for a sidebar).1fr: The fr means "fraction". 
         // The second column grows to fill one share (all) of the leftover empty space on the screen
-        <div className="h-dvh grid grid-cols-[352px_1fr] grid-rows-[minmax(0,1fr)] overflow-hidden bg-[var(--bg)] text-[var(--text)]">
-
+        <div
+            ref={shellRef}
+            onPointerMove={trackEdge}
+            onPointerLeave={() => setEdgeHot(false)}
+            className="relative h-dvh flex flex-col overflow-hidden bg-[var(--bg)] text-[var(--text)] lg:grid lg:grid-rows-[minmax(0,1fr)]"
+            style={{
+                gridTemplateColumns: cols,
+                // Animating the TRACK means the content reflows with the column
+                // instead of being slid over by a transform. Off during a drag —
+                // a transition there makes the divider lag behind the cursor.
+                transition: dragging ? 'none' : 'grid-template-columns .28s cubic-bezier(.4,0,.2,1)',
+            }}
+        >
             {/* ============ LEFT: chat column ============ */}
             {/* min-h-0: the vertical twin of min-w-0. Without it a grid item won't
                 shrink below its content, so the thread grows instead of scrolling. */}
-            <aside className="flex flex-col min-w-0 min-h-0 border-r border-[var(--line)] bg-[var(--panel)]">
+            {/* `relative` because the header and composer are lifted OUT of the
+                flow and float over the thread. That is what makes the glass real:
+                a header that sits above content in the flow has nothing behind it
+                to blur, and blurring the flat panel colour looks like nothing. */}
+            <aside className="relative w-full h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
 
-                {/* header — fixed */}
-                <header className="shrink-0 flex items-center gap-2.5 px-4 py-3.5 border-b border-[var(--line-soft)]">
+                {/* header — fixed. No bottom border in full-page mode: a rule across
+                    an empty page draws a line for no reason, and the reference has
+                    the title floating on the same surface as the thread. */}
+                <header className={`absolute inset-x-0 top-0 z-30 flex items-center gap-2.5 px-4 py-3.5 transition-[background-color,backdrop-filter,border-color] duration-300 ${
+                    threadScrolled
+                        ? 'border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--panel)_72%,transparent)] backdrop-blur-xl backdrop-saturate-150'
+                        : 'border-b border-transparent bg-transparent'
+                }`}>
                     {/* alt="" on purpose: the wordmark right next to it already
                         says "litmus", so naming the image too would make a screen
                         reader announce the brand twice. */}
@@ -514,19 +663,64 @@ export default function Litmus(){
                     <span className="font-mono font-semibold text-[15px]">litmus
                         <span className="text-[var(--violet)]">.</span>
                     </span>
-                    {/* hidden at idle — there is nothing to start over from */}
-                    {stage !== 'idle' && (
-                        <button
-                            onClick={startOver}
-                            className="ml-auto rounded-md px-2.5 py-1.5 font-mono text-[11px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
-                        >
-                            + new problem
-                        </button>
+
+                    {/* Once a problem is locked it becomes the document title, the way
+                        the reference names the thing you are working on rather than
+                        the tool you are working in. Truncated — a pasted assignment
+                        is a paragraph, not a title. */}
+                    {lockedProblem && (
+                        <span className="hidden lg:flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--muted)]">
+                            <span className="text-[var(--line)]">/</span>
+                            <span className="truncate max-w-[280px]">{lockedProblem}</span>
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--faint)]"><path d="m6 9 6 6 6-6"/></svg>
+                        </span>
                     )}
+
+                    <div className="ml-auto flex items-center gap-1.5">
+                        {/* hidden at idle — there is nothing to start over from */}
+                        {stage !== 'idle' && (
+                            <button
+                                onClick={startOver}
+                                className="rounded-md px-2.5 py-1.5 font-mono text-[11px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                            >
+                                + new problem
+                            </button>
+                        )}
+
+                        {/* The pane control. Its ICON changes on edge-hover — arrows
+                            at rest, a split panel when you are near the edge that
+                            would open it — so the corner and the edge are visibly
+                            the same control reached two ways. */}
+                        <button
+                            onClick={() => setLayoutOverride(layout === 'thread' ? 'split' : 'thread')}
+                            title={layout === 'thread' ? 'Split the pane' : 'Collapse to full page'}
+                            aria-label={layout === 'thread' ? 'Split the pane' : 'Collapse to full page'}
+                            className={`hidden lg:grid place-items-center rounded-md p-1.5 transition-colors ${
+                                edgeHot ? 'bg-[var(--violet)]/15 text-[var(--violet)]'
+                                        : 'text-[var(--faint)] hover:bg-[var(--panel-3)] hover:text-[var(--text)]'
+                            }`}
+                        >
+                            {layout === 'thread' && edgeHot ? (
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>
+                            ) : (
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3v6H3M15 21v-6h6M3 9l6-6M21 15l-6 6"/></svg>
+                            )}
+                        </button>
+                    </div>
                 </header>
 
-                {/* thread — the only part of this column that scrolls */}
-                <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 flex flex-col gap-5">
+                {/* thread — the only part of this column that scrolls.
+                    Full page does NOT mean full width. A line of prose spanning a
+                    27" monitor is unreadable, so the column is capped and centred
+                    and the page around it stays empty on purpose. When the pane is
+                    split it is already narrow, so the cap does nothing and comes
+                    off. */}
+                <div
+                    onScroll={(e) => setThreadScrolled(e.currentTarget.scrollTop > 8)}
+                    className={`h-full overflow-y-auto px-4 pt-20 pb-44 flex flex-col gap-5 ${
+                        layout === 'thread' ? 'w-full max-w-[820px] mx-auto' : ''
+                    }`}
+                >
 
                     {/* the interleaved chat log — user right, litmus left, in order */}
                     {messages.map((m, i) => {
@@ -603,12 +797,34 @@ export default function Litmus(){
                         </div>
                     )}
 
+                    {/* The blueprint renders IN the thread, not in the side pane.
+                        It is the thing being discussed, and at this stage there is
+                        no code yet — so it gets the whole page, in line with the
+                        conversation that produced it. */}
+                    {stage === 'blueprint' && blueprint && (
+                        <BlueprintPanel
+                            blueprint={blueprint}
+                            style={style}
+                            feedback={feedback}
+                            setFeedback={setFeedback}
+                            onRevise={revise}
+                            onLockIn={lockIn}
+                            busy={busy}
+                        />
+                    )}
+
                     {/* scroll anchor — the effect keeps this in view on every new message */}
                     <div ref={bottomRef} />
                 </div>
 
-                {/* composer — fixed to the bottom. Dims + freezes once we lock in. */}
-                <div className="shrink-0 border-t border-[var(--line-soft)] px-3.5 py-3">
+                {/* composer — fixed to the bottom. Dims + freezes once we lock in.
+                    It tracks the thread's width so the two read as one column. */}
+                <div className={`absolute inset-x-0 bottom-0 z-30 px-3.5 pb-5 pt-10 pointer-events-none ${
+                    layout === 'thread' ? 'mx-auto w-full max-w-[820px]' : ''
+                }`}>
+                    {/* the fade lives behind the box, not on it */}
+                    <div className="thread-fade pointer-events-none absolute inset-x-0 top-0 h-full" />
+                    <div className="relative pointer-events-auto">
                     <div className={`rounded-[10px] border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2.5 flex flex-col gap-2 focus-within:border-[var(--violet-dim)] transition-opacity ${locked ? 'opacity-40 pointer-events-none' : ''}`}>
                         <textarea
                             rows={2}
@@ -638,37 +854,160 @@ export default function Litmus(){
                     </button>
                         </div>
                     </div>
+                    </div>
                 </div>
-                
+
             </aside>
 
+            {/* ============ THE LIVE EDGE ============ */}
+            {/* In full-page mode there is no divider to grab, so the edge itself is
+                the handle: approach it and it lights, click it and the pane splits.
+                A 28px hit zone lit by a 3px line — the target has to be forgiving,
+                the mark does not. */}
+            {layout === 'thread' && (
+                <button
+                    onClick={() => setLayoutOverride('split')}
+                    aria-label="Split the pane"
+                    className="absolute inset-y-0 right-0 z-20 hidden w-7 lg:block cursor-col-resize"
+                >
+                    <span className={`absolute inset-y-0 right-0 w-[3px] transition-colors duration-150 ${
+                        edgeHot ? 'bg-[var(--violet)]' : 'bg-transparent'
+                    }`} />
+                </button>
+            )}
+
+            {/* ============ DIVIDER ============ */}
+            {/* Its own grid track rather than a border on either pane: a border
+                cannot be grabbed, and a positioned overlay would have to be kept
+                in sync with a column width it doesn't own. */}
+            <div
+                onPointerDown={startDrag}
+                onPointerMove={onDrag}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize panes"
+                className={`hidden lg:block relative group ${
+                    layout === 'split' ? 'cursor-col-resize' : 'pointer-events-none'
+                }`}
+            >
+                {/* The visible line is 6px but the grab area is 16px — a 6px hit
+                    target is a fight with the mouse.
+
+                    Transparent at rest. The panes are already separated by the gap
+                    around the sandbox's rounded card, so a permanent rule would be
+                    a second divider drawn on top of the one the layout already
+                    implies. It appears when you reach for it and not before. */}
+                <span className="absolute inset-y-0 -left-[5px] -right-[5px]" />
+                <span className={`block h-full w-full rounded-full transition-colors duration-200 ${
+                    dragging ? 'bg-[var(--violet)]' : 'bg-transparent group-hover:bg-[var(--violet)]/60'
+                }`} />
+            </div>
+
             {/* ============ RIGHT: workspace ============ */}
-            <main className="flex flex-col min-w-0 min-h-0">
+            {/* Padding, not margin, and box-border everywhere — so when the grid
+                track collapses to 0px the padding clips with it instead of holding
+                the pane open at 16px. */}
+            <main className="hidden lg:flex flex-col min-w-0 min-h-0 overflow-hidden p-2 pl-0">
 
-                {/* thin accent line on top of the bar; colour tracks the stage */}
-                <div className={`shrink-0 h-0.5 transition-colors duration-500 ${topLine}`} />
+                {/* The sandbox is a CARD, not a column: inset from the window and
+                    rounded, so the gap around it separates the panes and no rule
+                    has to be drawn between them. Its border is the status light —
+                    see .pane in index.css. */}
+                <div
+                    style={{ ['--pane-accent' as string]: paneAccent }}
+                    className={`pane flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl bg-[var(--panel)] ${
+                        paneWorking ? 'is-working' : paneLit ? 'is-lit' : ''
+                    }`}
+                >
 
-                {/* pipeline bar — fixed at the top; steps on the left, live status on the right */}
-                <header className="shrink-0 flex items-center gap-3 flex-wrap px-5 py-3 border-b border-[var(--line)] bg-[var(--panel)]">
-                    <Pipeline stage={stage} revising={stage === 'planning' && blueprint !== null} repaired={repaired} />
-                    <div className="ml-auto flex items-center gap-1.5 font-mono text-[12.5px] text-[var(--muted)]">
-                        <span>python:3.12-slim</span><span className="text-[var(--line)]">·</span><span>no network</span><span className="text-[var(--line)]">·</span>
-                        {shown  ?(
-                            <>
-                                <span className={`font-semibold ${shown.result.all_passed ? 'text-[var(--green)]' : 'text-[var(--red)]'}`}>
-                                    {shown.result.passed}/{shown.result.total} passed
-                                </span>
-                                {!shown.result.all_passed && (
-                                    <><span className="text-[var(--line)]">·</span><span className="text-[var(--red)]">{shown.result.failed} failed</span></>
-                                )}
-                                {shown.result.duration_ms != null && (
-                                    <><span className="text-[var(--line)]">·</span><span>{(shown.result.duration_ms / 1000).toFixed(2)}s</span></>
-                                )}
-                            </>
-                        ) : (
-                            <span className={`w-2 h-2 rounded-full ${statusDot.c} ${statusDot.pulse ? 'animate-pulse' : ''}`} />
+                {/* top bar: environment left, stage in the CENTRE, actions right.
+                    Absolute centring rather than justify-between, so the stage pill
+                    stays put as the actions on the right change width. */}
+                <header className="relative shrink-0 flex items-center px-4 py-2.5 border-b border-[var(--line-soft)]">
+
+                    <span className="hidden xl:flex items-center gap-1.5 font-mono text-[11px] text-[var(--faint)]">
+                        <span>python:3.12-slim</span>
+                        <span className="text-[var(--line)]">·</span>
+                        <span>no network</span>
+                    </span>
+
+                    {/* the pipeline, compressed to one pill. The long horizontal
+                        stepper could not survive the checks that now sit between
+                        stages; a single pill that names WHERE you are and takes the
+                        stage's colour says the same thing in a tenth of the space. */}
+                    <span
+                        className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full border px-3 py-1"
+                        style={{
+                            borderColor: `color-mix(in srgb, ${paneAccent} 45%, transparent)`,
+                            background:  `color-mix(in srgb, ${paneAccent} 10%, transparent)`,
+                        }}
+                    >
+                        <span
+                            className={`h-1.5 w-1.5 rounded-full ${paneWorking ? 'animate-pulse' : ''}`}
+                            style={{ background: paneAccent }}
+                        />
+                        <span className="font-mono text-[11.5px] font-medium" style={{ color: paneAccent }}>
+                            {stage === 'idle'       ? 'idle'
+                           : stage === 'styling'    ? 'style'
+                           : stage === 'awaiting_style' ? 'style'
+                           : stage === 'planning'   ? (blueprint ? 'revising' : 'blueprint')
+                           : stage === 'blueprint'  ? 'blueprint'
+                           : stage === 'generating' ? 'generating'
+                           : stage === 'verifying'  ? 'verifying'
+                           : stage === 'repairing'  ? 'repairing'
+                           :                          'done'}
+                        </span>
+                        {shown && stage === 'done' && (
+                            <span className="font-mono text-[11.5px] text-[var(--muted)]">
+                                {shown.result.passed}/{shown.result.total}
+                            </span>
                         )}
-                    </div>
+                    </span>
+
+                    {/* actions. Disabled rather than hidden until there is something
+                        to copy — a control that appears and disappears makes the bar
+                        jump every time a run finishes. */}
+                    <span className="ml-auto flex items-center gap-1">
+                        <button
+                            onClick={() => copy('code')}
+                            disabled={!shown}
+                            className="rounded-md px-2.5 py-1.5 font-mono text-[11px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[var(--faint)]"
+                        >
+                            {copied === 'code' ? '✓ copied' : 'copy solution'}
+                        </button>
+                        <button
+                            onClick={() => copy('tests')}
+                            disabled={!result?.tests}
+                            className="rounded-md px-2.5 py-1.5 font-mono text-[11px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[var(--faint)]"
+                        >
+                            {copied === 'tests' ? '✓ copied' : 'copy tests'}
+                        </button>
+
+                        <span className="mx-1 h-4 w-px bg-[var(--line)]" />
+
+                        <button
+                            onClick={() => setLayoutOverride(layout === 'sandbox' ? 'split' : 'sandbox')}
+                            title={layout === 'sandbox' ? 'Back to split view' : 'Expand to full page'}
+                            aria-label={layout === 'sandbox' ? 'Back to split view' : 'Expand to full page'}
+                            className="rounded-md p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                        >
+                            {layout === 'sandbox' ? (
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3v6H3M15 21v-6h6"/></svg>
+                            ) : (
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => setLayoutOverride('thread')}
+                            title="Minimise the sandbox"
+                            aria-label="Minimise the sandbox"
+                            className="rounded-md p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                        >
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/></svg>
+                        </button>
+                    </span>
                 </header>
 
                 {/* stage area — the only part of this column that scrolls */}
@@ -715,19 +1054,6 @@ export default function Litmus(){
                         </div>
                     )}
 
-                    {/* the blueprint card — wide and short, built from real fields */}
-                    {stage === 'blueprint' && blueprint && (
-                        <BlueprintPanel
-                            blueprint={blueprint}
-                            style={style}
-                            feedback={feedback}
-                            setFeedback={setFeedback}
-                            onRevise={revise}
-                            onLockIn={lockIn}
-                            busy={busy}
-                        />
-                    )}
-
                     { stage === "done" && result &&(
                         <div className="flex flex-col min-w-0 min-h-0 rounded-[11px] border border-[var(--line)] bg-[var(--panel)] overflow-hidden">
                             <Results
@@ -744,6 +1070,7 @@ export default function Litmus(){
                     )}
 
             </div>
+                </div>
             </main>
         </div>
     )

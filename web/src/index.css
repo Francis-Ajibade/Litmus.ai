@@ -1,5 +1,60 @@
 @import "tailwindcss";
 
+/* ---- JetBrains Mono: the typeface the whole design is actually set in ----
+   Self-hosted rather than linked from Google Fonts: no third-party request on
+   every visit, no extra DNS + TLS round trip to fonts.gstatic.com before type
+   can render, nothing to leak about who visited, and it still works offline.
+
+   ONE file, 40KB. It's a VARIABLE font spanning weights 100-800, so the 400 /
+   500 / 600 / 700 this app uses all come out of the same download instead of
+   four separate ones.
+
+   font-display:swap is the real answer to "should we add a preloader": text
+   paints immediately in the fallback face and swaps when the real one lands.
+   Nothing is ever blocked on the font, so there is nothing to wait behind.
+
+   SIL Open Font License 1.1 — full text in public/fonts/OFL.txt, which has to
+   ship alongside the font for redistribution to be legitimate. */
+@font-face{
+  font-family:'JetBrains Mono';
+  font-style:normal;
+  font-weight:100 800;
+  font-display:swap;
+  src:url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Point Tailwind's own font-mono at it. THIS is why no component has to change:
+   every `font-mono` already written across Landing.tsx and Litmus.tsx resolves
+   through this one line. */
+@theme{
+  --font-mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+
+/* In-page anchor jumps (the nav's "How it works") glide instead of teleporting.
+   This is the ONE line that makes href="#id" feel designed — and it's on <html>
+   because that's the element that actually scrolls.
+
+   Guarded: for anyone who asked for less motion, a long smooth scroll is one of
+   the worst offenders, so they get the instant jump. */
+/* THE base colours. There was no body rule at all, so any element that didn't
+   set its own colour inherited the browser default — black — which is why the
+   uncoloured runs inside the landing page's code panels ("._items = []", the
+   indentation, "(self, capacity):") were black on a near-black panel. Every
+   token-coloured span was fine; it was everything BETWEEN them that vanished.
+
+   Fixing it here rather than on a wrapper div means every surface inherits it:
+   the landing page, the workspace, and anything added later. A component that
+   forgets a text colour now degrades to readable instead of invisible. */
+body{ background:var(--bg); color:var(--text); }
+
+html{ scroll-behavior:smooth }
+@media (prefers-reduced-motion:reduce){
+  html{ scroll-behavior:auto }
+}
+
 /* ---- CSS island: the two things uglier in utilities than in CSS ---- */
 
 :root{
@@ -9,7 +64,7 @@
   --text:#e9e9ef; --muted:#8a8a99; --faint:#5a5a68;
   --violet:#8b5cf6; --violet-dim:#6d4dc4; --indigo:#4338ca; --magenta:#c026d3;
   --green:#3fb950; --red:#f85149; --amber:#d9a441;
-  --glass:rgba(20,20,26,.55); --glass-line:rgba(255,255,255,.09);
+  --glass:rgba(20,20,26,.55); --glass-strong:rgba(14,14,18,.72); --glass-line:rgba(255,255,255,.09);
   /* Secondary copy that still has to read as DESIGNED, not as leftover chrome.
      --faint (#5a5a68) is a muddy blue-grey: it dims by desaturating, which is
      what makes it look washed out rather than quiet. This dims the SAME white
@@ -45,10 +100,42 @@
     radial-gradient(38% 34% at 76% 58%, rgba(192,38,211,.22), transparent 70%);
 }
 
+/* the hero band's violet mesh. ::before paints it, ::after lays grain over the
+   top — without the grain the wide gradient bands visibly step on most screens.
+   Both are pseudo-elements so the hero's own children stay above them without
+   needing a z-index on every one; they only need `relative` on the parent. */
+.mesh::before{
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(60% 45% at 50% 118%, rgba(192,38,211,.95) 0%, rgba(192,38,211,0) 62%),
+    radial-gradient(70% 50% at 22% 96%,  rgba(139,92,246,.85) 0%, rgba(139,92,246,0) 65%),
+    radial-gradient(65% 48% at 82% 92%,  rgba(217,70,239,.62) 0%, rgba(217,70,239,0) 62%),
+    radial-gradient(85% 60% at 50% 62%,  rgba(67,56,202,.72)  0%, rgba(67,56,202,0)  70%),
+    linear-gradient(180deg, #08080a 0%, #131327 34%, #2b1d5e 58%, #6d28d9 80%, #a21caf 100%);
+}
+.mesh::after{
+  content:''; position:absolute; inset:0; opacity:.16; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
 .grain {
   opacity: .14;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.mesh::before{
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(60% 45% at 50% 118%, rgba(192,38,211,.95) 0%, rgba(192,38,211,0) 62%),
+    radial-gradient(70% 50% at 22% 96%,  rgba(139,92,246,.85) 0%, rgba(139,92,246,0) 65%),
+    radial-gradient(65% 48% at 82% 92%,  rgba(217,70,239,.62) 0%, rgba(217,70,239,0) 62%),
+    radial-gradient(85% 60% at 50% 62%,  rgba(67,56,202,.72)  0%, rgba(67,56,202,0)  70%),
+    linear-gradient(180deg, #08080a 0%, #131327 34%, #2b1d5e 58%, #6d28d9 80%, #a21caf 100%);
+}
+.mesh::after{
+  content:''; position:absolute; inset:0; opacity:.16; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 .vg{color:#3fb950}
@@ -117,6 +204,90 @@
 .pstep[data-branch="repair"][data-state="done"]   .fill  { background:var(--amber); }
 .pstep[data-branch="repair"][data-state="active"] .label,
 .pstep[data-branch="repair"][data-state="done"]   .label { color:var(--amber); }
+
+/* ---------- landing hero: the machine types, the question interrupts ----------
+   Only the FIRST line types. The machine's half of the sentence gets generated,
+   mechanically; then "Can you?" doesn't type — it's just there, all at once,
+   like someone cutting in. The contrast in delivery IS the argument the page
+   is making.
+
+   clip-path rather than an animated width: the box never changes size, so a
+   centred line doesn't drift sideways while it reveals, and the full text sits
+   in the DOM from the first frame — screen readers and crawlers get the whole
+   headline, not a growing fragment. steps() is what makes it read as typing
+   rather than wiping.
+
+   20 characters over 1.5s is 75ms each — the pace a terminal actually prints
+   at. Much under ~50ms and the eye stops resolving individual characters, so it
+   reads as a wipe rather than as typing; much over ~100ms and it feels stalled. */
+.type-line{ animation: typeReveal 1.5s steps(20) both; }
+@keyframes typeReveal{
+  from { clip-path: inset(0 100% 0 0) }
+  to   { clip-path: inset(0 0 0 0) }
+}
+
+/* The caret rides the reveal edge. It works because it shares the reveal's
+   EXACT duration and timing function — same 1.5s, same steps(20) — so the two
+   advance on identical ticks and can never drift apart. Then it fades out as
+   the question arrives: the machine's cursor leaves when the human speaks. */
+.type-caret{
+  position:absolute; top:.14em; bottom:.14em; width:.055em;
+  background:var(--violet);
+  animation: caretTrack 1.5s steps(20) both,
+             caretOut .12s ease-out 1.62s both;
+}
+@keyframes caretTrack{ from{ left:0 } to{ left:100% } }
+@keyframes caretOut{ from{ opacity:1 } to{ opacity:0 } }
+
+/* .12s sits below the threshold where the eye reads a fade — it lands as an
+   appearance, without the harshness of a true instant cut. */
+.type-answer{ animation: answerIn .12s ease-out 1.68s both; }
+@keyframes answerIn{ from{ opacity:0 } to{ opacity:1 } }
+
+/* ---------- landing proof panel: the run plays out, ending on the failure ----------
+   Gated on the section's own scroll reveal via [data-shown], so the four passes
+   and the one failure land WHEN you look at the panel, not silently while it is
+   still below the fold.
+
+   The default is VISIBLE — only an explicit data-shown="false" hides a line. If
+   the observer never fires, the terminal reads as a plain static log instead of
+   a blank panel. Never let content depend on an animation to exist. */
+[data-shown="false"] .term-line{ opacity:0 }
+[data-shown="true"]  .term-line{ animation: termIn .3s ease both }
+@keyframes termIn{
+  from { opacity:0; transform:translateY(3px) }
+  to   { opacity:1; transform:none }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .type-line{ animation:none; clip-path:none }
+  .type-caret{ display:none }
+  .type-answer{ animation:none; opacity:1 }
+  [data-shown="false"] .term-line{ opacity:1 }
+  [data-shown="true"]  .term-line{ animation:none }
+}
+
+/* ---------- landing: the magic moment plays out, then holds ----------
+   One 18s cycle: the six turns land in the first ~5s, sit for ~11s, reset.
+   The stagger is an inline animation-delay per turn, so the keyframes stay
+   shared. A conversation that re-runs every three seconds reads as a loading
+   spinner; one that plays once and rests reads as a recording. */
+.turn{ animation: turnIn 18s ease infinite both; }
+@keyframes turnIn{
+  0%, 3%    { opacity:0; transform:translateY(8px) }
+  8%, 92%   { opacity:1; transform:none }
+  96%, 100% { opacity:0 }
+}
+/* the callout lands WITH the refusal, not before it — that timing is the joke */
+.callout-in{ animation: calloutIn 18s ease infinite both; }
+@keyframes calloutIn{
+  0%, 12%   { opacity:0; transform:translateY(-8px) }
+  18%, 92%  { opacity:1; transform:none }
+  96%, 100% { opacity:0 }
+}
+@media (prefers-reduced-motion:reduce){
+  .turn, .callout-in{ animation:none; opacity:1; transform:none }
+}
 
 /* ---------- litmus messages fade in ---------- */
 @keyframes fadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
@@ -230,3 +401,58 @@
 .hljs-params, .hljs-variable                             { color:var(--text); }
 .hljs-operator, .hljs-punctuation, .hljs-attr            { color:var(--muted); }
 
+
+/* ---------- app home: the caret that stays after the headline lands ----------
+   The headline itself is typed from JS (a character at a time, with jitter), so
+   the only part that belongs in CSS is the blink that starts once the typing
+   has finished. steps(1,end) is what makes it a hard on/off — a caret that
+   fades in and out reads as a pulsing decoration, not as a text cursor.
+
+   The blink is applied by a Tailwind arbitrary-animation utility on the span,
+   which is why only the @keyframes live here: the timing is in the markup with
+   the element it belongs to. */
+@keyframes caretBlink{ 50%{ opacity:0 } }
+@media (prefers-reduced-motion:reduce){
+  /* A cursor blinking forever is exactly the kind of perpetual motion the
+     preference exists to stop. The caret still renders — it just holds still. */
+  [class*="caretBlink"]{ animation:none !important }
+}
+
+/* ---------- the sandbox pane: a surface that reports its own state ----------
+   The pane's EDGE is the status indicator — the whole rounded border, lit. A
+   separate badge would be one more thing to read; a lit border is read
+   peripherally, while you are looking at the code inside it.
+
+   --pane-accent is published as an inline style by the component (violet while
+   working, amber on repair, green or red on a verdict), so every rule below
+   derives from that one variable and no rule here branches on stage. */
+.pane{
+  border:1px solid var(--pane-accent);
+  transition: border-color .45s ease, box-shadow .45s ease;
+}
+/* settled: a steady ring plus a soft throw of light onto the page behind it */
+.pane.is-lit{
+  box-shadow:0 0 0 1px var(--pane-accent),
+             0 0 38px -8px var(--pane-accent);
+}
+/* working: the same glow, breathing. Slow — 1.9s, not 0.6s — because this runs
+   for the whole length of a generation, and a fast pulse over thirty seconds
+   stops reading as progress and starts reading as an alarm. */
+.pane.is-working{ animation: panePulse 1.9s ease-in-out infinite; }
+@keyframes panePulse{
+  0%, 100% { box-shadow:0 0 0 1px color-mix(in srgb, var(--pane-accent) 35%, transparent),
+                        0 0 16px -8px var(--pane-accent); }
+  50%      { box-shadow:0 0 0 1px var(--pane-accent),
+                        0 0 44px -4px var(--pane-accent); }
+}
+@media (prefers-reduced-motion:reduce){
+  /* hold the lit state rather than dropping the signal entirely */
+  .pane.is-working{ animation:none; box-shadow:0 0 0 1px var(--pane-accent), 0 0 30px -8px var(--pane-accent); }
+}
+
+/* The fade the composer floats on. Without it the thread's last line is sliced
+   in half by the composer's top edge; with it the text dissolves into the
+   surface and the composer reads as sitting ABOVE the page rather than on it. */
+.thread-fade{
+  background:linear-gradient(180deg, transparent 0%, var(--panel) 62%);
+}
