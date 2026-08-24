@@ -75,7 +75,7 @@ function SectionHead({ eyebrow, eyebrowColor, title, children }:
     return (
         <>
             <span className={`font-mono text-[11px] tracking-[.1em] uppercase ${eyebrowColor}`}>{eyebrow}</span>
-            <h2 className="font-mono font-bold text-[26px] md:text-[34px] tracking-[-0.028em] mt-4 text-center text-balance">{title}</h2>
+            <h2 className="display text-[27px] md:text-[36px] mt-4 text-center text-balance">{title}</h2>
             {children && (
                 <p className="mt-4 max-w-[640px] text-[14px] md:text-[15px] leading-[1.7] text-(--muted) text-center text-pretty">{children}</p>
             )}
@@ -166,7 +166,7 @@ export default function Landing(){
                         breakpoint steps UP. Two properties carry big type: leading
                         near 1.0 (default leading is built for paragraphs and leaves
                         a canyon at 74px) and negative tracking. */}
-                    <h1 className="font-mono font-bold text-[28px] sm:text-[36px] md:text-[48px] lg:text-[74px] leading-[1.02] tracking-[-0.045em] text-white/45 max-w-250 text-balance">
+                    <h1 className="display text-[30px] sm:text-[38px] md:text-[52px] lg:text-[78px] tracking-[-0.038em] text-white/45 max-w-250 text-balance">
                         {/* w-fit + mx-auto so each line's box hugs its own text and
                             stays centred — clip-path then reveals across the TEXT,
                             not across the full column width. */}
@@ -190,7 +190,7 @@ export default function Landing(){
                     <div className="flex flex-col items-center gap-4 mt-10 md:mt-10.5 w-full">
                         {/* A Link, not a button — it goes somewhere, so it has to
                             survive ⌘-click, middle-click and "copy link address". */}
-                        <Link to="/sandbox" className="flex items-center justify-center gap-2.5 w-full sm:w-auto h-13.5 px-8 rounded-[13px] bg-(--violet) text-white text-[15px] md:text-[16.5px] font-semibold shadow-[0_6px_28px_rgba(139,92,246,.55)] transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                        <Link to="/sandbox" className="flex items-center justify-center gap-2.5 w-full sm:w-auto h-13.5 px-8 rounded-[13px] bg-(--violet) text-white text-[15.5px] md:text-[17px] font-semibold tracking-[-0.01em] shadow-[0_6px_28px_rgba(139,92,246,.55)] transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
                             <span>Try it on your assignment</span>
                             <span className="text-[17px]">&#8594;</span>
                         </Link>
@@ -465,10 +465,10 @@ export default function Landing(){
             {/* ═══════════ 6 · FINAL CTA ═══════════ */}
             <Reveal>
             <div className="flex flex-col items-center gap-5 px-5 md:px-14 pt-16 md:pt-24 lg:pt-29.5">
-                <h3 className="font-mono font-bold text-[26px] md:text-[38px] tracking-[-0.032em] text-center text-balance max-w-[720px]">
+                <h3 className="display text-[28px] md:text-[40px] text-center text-balance max-w-[720px]">
                     Bring the assignment you don&rsquo;t understand.
                 </h3>
-                <Link to="/sandbox" className="flex items-center justify-center gap-2.5 w-full sm:w-auto h-13.5 px-8 rounded-[13px] bg-(--violet) text-white text-[15px] md:text-[16.5px] font-semibold shadow-[0_6px_28px_rgba(139,92,246,.5)] transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                <Link to="/sandbox" className="flex items-center justify-center gap-2.5 w-full sm:w-auto h-13.5 px-8 rounded-[13px] bg-(--violet) text-white text-[15.5px] md:text-[17px] font-semibold tracking-[-0.01em] shadow-[0_6px_28px_rgba(139,92,246,.5)] transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
                     <span>Try it &mdash; no signup</span>
                     <span className="text-[17px]">&#8594;</span>
                 </Link>

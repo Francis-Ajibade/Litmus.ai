@@ -31,6 +31,21 @@
    through this one line. */
 @theme{
   --font-mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+  /* Proportional for anything a person READS — headlines, body, buttons, labels.
+     Mono is reserved for what is genuinely monospaced data: code, terminal
+     output, test names, durations, counts.
+
+     Setting everything in a monospace face is a house style that reads as
+     "generated": it flattens the difference between a sentence and a stack
+     trace, and mono's even advance is the wrong tool for a headline, where the
+     eye wants the rhythm that proportional letterforms give it.
+
+     The system stack, not a webfont: it costs zero bytes and zero requests
+     (same reason JetBrains Mono is self-hosted above), and it renders in the
+     face the reader's OS already trusts — SF on a Mac, Segoe on Windows. It is
+     also deliberately NOT Inter, which by now reads as the default of every
+     generated interface. */
+  --font-sans:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
 }
 
 /* In-page anchor jumps (the nav's "How it works") glide instead of teleporting.
@@ -100,22 +115,36 @@ html{ scroll-behavior:smooth }
     radial-gradient(38% 34% at 76% 58%, rgba(192,38,211,.22), transparent 70%);
 }
 
-/* the hero band's violet mesh. ::before paints it, ::after lays grain over the
-   top — without the grain the wide gradient bands visibly step on most screens.
-   Both are pseudo-elements so the hero's own children stay above them without
-   needing a z-index on every one; they only need `relative` on the parent. */
+/* ---------- the hero ground ----------
+   This used to be a violet-to-magenta bloom rising off the bottom edge, four
+   stacked radial gradients ending on #a21caf. It was the single loudest thing
+   on the page and it is the signature move of every generated interface —
+   which made a product about proving things look like it had been guessed at.
+
+   What replaces it is the texture this product actually owns: a terminal. A
+   near-black ground, one dim violet wash (about a sixth of the old intensity)
+   so the brand colour is present rather than announced, faint scanlines, and
+   the grain that was already here. The eye reads a screen, not a gradient. */
 .mesh::before{
   content:''; position:absolute; inset:0;
   background:
-    radial-gradient(60% 45% at 50% 118%, rgba(192,38,211,.95) 0%, rgba(192,38,211,0) 62%),
-    radial-gradient(70% 50% at 22% 96%,  rgba(139,92,246,.85) 0%, rgba(139,92,246,0) 65%),
-    radial-gradient(65% 48% at 82% 92%,  rgba(217,70,239,.62) 0%, rgba(217,70,239,0) 62%),
-    radial-gradient(85% 60% at 50% 62%,  rgba(67,56,202,.72)  0%, rgba(67,56,202,0)  70%),
-    linear-gradient(180deg, #08080a 0%, #131327 34%, #2b1d5e 58%, #6d28d9 80%, #a21caf 100%);
+    /* the one violet cue, low and wide — a glow at the horizon, not a sunrise */
+    radial-gradient(120% 60% at 50% 108%, rgba(139,92,246,.16) 0%, rgba(139,92,246,0) 60%),
+    /* a second, tighter and dimmer, so the falloff is not a single flat ramp */
+    radial-gradient(70% 45% at 18% 96%, rgba(67,56,202,.12) 0%, rgba(67,56,202,0) 65%),
+    linear-gradient(180deg, #08080a 0%, #0a0a0f 55%, #0d0b14 100%);
 }
+/* scanlines: 3px pitch, barely there. This is what makes the ground read as a
+   display surface. Any stronger and it moirés against text at some zoom level,
+   which is why it sits at .35 alpha on a 1px line and no higher. */
 .mesh::after{
-  content:''; position:absolute; inset:0; opacity:.16; mix-blend-mode:overlay;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background-image:
+    repeating-linear-gradient(180deg, rgba(255,255,255,.014) 0 1px, transparent 1px 3px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:auto, 200px 200px;
+  opacity:.5;
+  mix-blend-mode:overlay;
 }
 
 .grain {
@@ -124,19 +153,8 @@ html{ scroll-behavior:smooth }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-.mesh::before{
-  content:''; position:absolute; inset:0;
-  background:
-    radial-gradient(60% 45% at 50% 118%, rgba(192,38,211,.95) 0%, rgba(192,38,211,0) 62%),
-    radial-gradient(70% 50% at 22% 96%,  rgba(139,92,246,.85) 0%, rgba(139,92,246,0) 65%),
-    radial-gradient(65% 48% at 82% 92%,  rgba(217,70,239,.62) 0%, rgba(217,70,239,0) 62%),
-    radial-gradient(85% 60% at 50% 62%,  rgba(67,56,202,.72)  0%, rgba(67,56,202,0)  70%),
-    linear-gradient(180deg, #08080a 0%, #131327 34%, #2b1d5e 58%, #6d28d9 80%, #a21caf 100%);
-}
-.mesh::after{
-  content:''; position:absolute; inset:0; opacity:.16; mix-blend-mode:overlay;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
-}
+/* (a duplicate .mesh block lived here and silently overrode the one above —
+   removed with the gradient it was re-applying) */
 
 .vg{color:#3fb950}
 .va{color:#d9a441}
@@ -416,6 +434,17 @@ html{ scroll-behavior:smooth }
   /* A cursor blinking forever is exactly the kind of perpetual motion the
      preference exists to stop. The caret still renders — it just holds still. */
   [class*="caretBlink"]{ animation:none !important }
+}
+
+/* Display type. Proportional faces need help to carry a headline: at 48px+ the
+   default tracking is built for paragraphs and leaves gaps between letters, so
+   this pulls them together and drops the line-height near 1. Applied as a class
+   rather than baked into h1 so a heading inside prose is unaffected. */
+.display{
+  font-family:var(--font-sans);
+  font-weight:700;
+  letter-spacing:-0.032em;
+  line-height:1.04;
 }
 
 /* ---------- the sandbox pane: a surface that reports its own state ----------

@@ -244,7 +244,7 @@ export default function BlueprintCard(props: Props) {
                     {/* the tease: content dissolves rather than being sliced, and
                         the prompt rides the fade so it is never over text */}
                     <span className="pointer-events-none absolute inset-x-0 bottom-0 flex h-28 items-end justify-center bg-[linear-gradient(180deg,transparent,var(--panel-2)_72%)] pb-3">
-                        <span className="flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--panel)] px-3 py-1.5 font-mono text-[11px] text-[var(--muted)] transition-colors group-hover:border-[var(--violet)] group-hover:text-[var(--text)]">
+                        <span className="flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--panel)] px-3 py-1.5 text-[11.5px] text-[var(--muted)] transition-colors group-hover:border-[var(--violet)] group-hover:text-[var(--text)]">
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                             expand
                         </span>

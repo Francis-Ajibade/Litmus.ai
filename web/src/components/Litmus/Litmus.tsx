@@ -874,7 +874,7 @@ export default function Litmus(){
                             <button
                                 onClick={composingStyle ? submitStyle : testSelected ? runTestCase : submitProblem}
                                 disabled={busy || trying || !problem.trim()}
-                                className="rounded-md bg-[var(--violet)] px-3.5 py-1.5 font-mono text-[12.5px] font-semibold text-white hover:bg-[var(--violet-dim)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="rounded-md bg-[var(--violet)] px-3.5 py-1.5 text-[13px] font-semibold text-white hover:bg-[var(--violet-dim)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {busy ? 'Generating…' : trying ? 'Running…' : composingStyle ? 'Set style' : testSelected ? 'Run' : 'Generate'}
                     </button>
@@ -1087,7 +1087,7 @@ export default function Litmus(){
                             seconds. min-h on the <p> does the same job vertically, holding
                             the row open for the couple of tips that wrap to two lines. */}
                         <div className="flex w-[420px] max-w-full flex-col items-center gap-2.5">
-                                <h3 className="font-mono text-[14.5px] font-semibold text-[var(--text)]">
+                                <h3 className="text-[15px] font-semibold text-[var(--text)]">
                                     {stage === 'planning'   ? 'Awaiting blueprint lock'
                                    : stage === 'generating' ? 'Writing solution and tests'
                                    :                          'Sandbox idle'}
