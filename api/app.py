@@ -22,7 +22,7 @@ from slowapi.errors import RateLimitExceeded
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sandbox import SandboxResult
-from main import MODELS, THINKING_MODEL, run_engine, generate_blueprint, try_expression
+from main import Blueprint, run_engine, generate_blueprint, try_expression, is_coding_request
 
 def client_ip(request:Request) -> str:
     """The caller's real IP address.
@@ -91,14 +91,20 @@ app.add_middleware(
 class BlueprintRequest(BaseModel):
     problem: str
     style: str = ""
-    prior: dict | None = None   # the blueprint the browser is holding, echoed back
+    prior: Blueprint | None = None   # the blueprint the browser is holding, echoed back
     feedback: str = ""          # "" on the first turn; a refinement on later turns
 
 
 class RunRequest(BaseModel):
     problem: str
     style: str = ""
-    blueprint: dict             # the approved blueprint the browser locked
+    blueprint: Blueprint        # the approved blueprint the browser locked
+
+
+class CheckRequest(BaseModel):
+    """Just the problem. The style question has not been asked yet at this point —
+    the whole reason this endpoint exists is to run BEFORE it."""
+    problem: str
 
 
 class TryRequest(BaseModel):
@@ -124,6 +130,33 @@ def serialize_result(result : SandboxResult) -> dict:
     # asdict(result), then set ["all_passed"] = result.all_passed
 
 
+@app.post("/api/check")
+# Deliberately NOT rate limited. The classifier runs on a free-tier model, so there
+# is no bill to protect, and a quota error there fails open by design — the run
+# proceeds unguarded rather than breaking. The trade is that an exhausted quota
+# leaves the guard open for everyone until it resets; the print inside
+# is_coding_request is the only warning you get.
+async def check_problem(req: CheckRequest) -> dict:
+    """Is this a coding request? Answered before anything is committed.
+
+    Returns 200 either way. A decline is a normal product answer, not an error —
+    a 4xx would send the browser's state machine down its error branch and show
+    failure chrome to someone who simply asked an off-topic question.
+
+    No `request: Request` parameter: that exists only so slowapi can find the
+    caller's IP, and nothing is limiting this endpoint.
+    """
+    if await is_coding_request(req.problem):
+        return {"declined": False}
+    return {
+        "declined": True,
+        "message": (
+            "I help with coding problems — try pasting a coding question, "
+            "an assignment, or the code that's breaking."
+        ),
+    }
+
+
 # @app.post must stay ABOVE @limiter.limit: decorators apply bottom-up, so the
 # limiter wraps the function first and app.post then registers the wrapped
 # version. Flip them and FastAPI registers the bare function — the limit silently
@@ -131,16 +164,20 @@ def serialize_result(result : SandboxResult) -> dict:
 # caller's IP by looking up a parameter with that exact NAME on the signature.
 @app.post("/api/blueprint")
 @limiter.limit("5/hour")
-def make_blueprint(request: Request, req: BlueprintRequest) -> dict:
+async def make_blueprint(request: Request, req: BlueprintRequest) -> dict:
     """One turn of the blueprint conversation. First call: prior=None, feedback="".
-    Refinement calls: prior=<the bp>, feedback=<what to change>. Returns the bp dict.
+    Refinement calls: prior=<the bp>, feedback=<what to change>.
+
+    `async def`, not `def`: the blueprint step is an agent run now, so this awaits
+    a network round trip. A sync endpoint would hold a threadpool worker for the
+    entire call instead of yielding the loop.
     """
-    # The blueprint is the REASONING job, so it runs on THINKING_MODEL — not the
-    # code model. MODELS[...] resolves which provider hosts it, so the client and
-    # the model id can never drift apart.
-    client = MODELS[THINKING_MODEL]
-    bp = generate_blueprint(client, THINKING_MODEL, req.problem, req.style, prior = req.prior, feedback= req.feedback)
-    return bp
+    bp = await generate_blueprint(
+        req.problem, req.style, prior=req.prior, feedback=req.feedback
+    )
+    # model_dump because the return annotation is `-> dict`: FastAPI validates the
+    # response against it, and a Blueprint instance is not a dict.
+    return bp.model_dump()
 
 
 @app.post("/api/run")

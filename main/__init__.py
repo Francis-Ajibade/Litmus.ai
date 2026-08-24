@@ -1,5 +1,8 @@
 from main.new_code import (
+    Blueprint,
+    TestCase,
     generate_blueprint,
+    is_coding_request,
     blueprint_to_text,
     test_spec_from_blueprint,
     generate_tests,
@@ -15,7 +18,10 @@ from main.new_code import (
 )
 
 __all__ = [
+    "Blueprint",
+    "TestCase",
     "generate_blueprint",
+    "is_coding_request",
     "blueprint_to_text",
     "test_spec_from_blueprint",
     "generate_tests",
