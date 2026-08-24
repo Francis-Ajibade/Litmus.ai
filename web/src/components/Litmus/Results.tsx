@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import hljs from "highlight.js/lib/core";
 import python from "highlight.js/lib/languages/python";
 import type { Attempt, TestCase, TryEntry } from "./Litmus";
@@ -19,6 +19,15 @@ type Tab = 'code' | 'tests' | 'console' | 'cases'
 const LINE_H = 20
 // how fast each panel streams in. Tests are slower on purpose: a row per ~90ms
 // reads like a suite executing, where 28ms/line reads like code being written.
+// The strip's own chrome — handle + the results line — which sits above the
+// scrollable list. The ceiling has to include it or dragging to "full"
+// would still clip the last row.
+const STRIP_HEAD = 46
+// Collapsed floor. Dragging to a true 0 would take the grab handle down with
+// it — the console would be gone with no way to bring it back, since the only
+// control for it lives inside the thing that just disappeared. This leaves a
+// status bar: the verdict, and a handle to pull it open again.
+const STRIP_MIN = 34
 const LINE_MS = 28
 const ROW_MS  = 90
 
@@ -32,7 +41,9 @@ function headline(message: string): string {
 
 interface ResultProps {
     attempts : Attempt[],
-    // the pytest source. Not read yet — it feeds "Copy tests" in the next block.
+    // the pytest source. Destructured out of this component now that copying
+    // lives in the pane header — Litmus reads result.tests directly. Kept on the
+    // interface because the parent still passes it and it belongs to this shape.
     testSource : string,
     // the approved cases, as objects — description/input are read as fields,
     // which is what lets the Test button prefill without parsing anything.
@@ -49,7 +60,7 @@ interface ResultProps {
     tryLog: TryEntry[]
     trying: boolean
 }
-export default function Result({attempts, selected, onSelect, testSource, testSpec, setTestCase, tryLog, trying} : ResultProps){
+export default function Result({attempts, selected, onSelect, testSpec, setTestCase, tryLog, trying} : ResultProps){
     const [tab, setTab] = useState<Tab>('code')
     // which tracebacks are expanded, keyed by test name. A Set rather than a
     // single string, because opening one shouldn't collapse another.
@@ -115,98 +126,126 @@ export default function Result({attempts, selected, onSelect, testSource, testSp
         return () => clearTimeout(id)      // a second result mid-flash restarts it
     }, [tryLog.length])
 
-    // which button was last pressed, so it can say "Copied" for a moment. An
-    // alert() blocks the whole page and has to be dismissed — heavy feedback for
-    // an action that succeeded silently.
-    const [copied, setCopied] = useState<'code' | 'tests' | null>(null)
+    // Copying moved to the pane header in Litmus.tsx, where it sits with the
+    // other pane-level actions instead of being buried at the bottom of a tab.
 
-    const handleCopy = async (what: 'code' | 'tests') => {
-        try {
-            await navigator.clipboard.writeText(what === 'code' ? attempt.code : testSource);
-            setCopied(what);
-            setTimeout(() => setCopied(null), 1600);
-        } catch (err) {
-            console.error("Failed to copy text: ", err);
-        }
-    };
+    // ── the results strip, as a draggable console ─────────────────────────
+    // null = "as tall as its content". Once dragged it becomes a pixel height,
+    // and the code panel above gives up exactly that much room — the same deal
+    // an IDE's terminal makes with its editor.
+    const [stripH, setStripH] = useState<number | null>(null)
+    const [stripDrag, setStripDrag] = useState(false)
+    const stripBodyRef = useRef<HTMLDivElement>(null)
+    const dragFrom = useRef({ y: 0, h: 0 })
+
+    // The ceiling is the content's own height. Dragging past it would buy empty
+    // space, and empty space in a console reads as a bug rather than a choice.
+    const naturalH = () => (stripBodyRef.current?.scrollHeight ?? 0) + STRIP_HEAD
+
+    // Collapsed enough that the list would be a sliver — show the summary only.
+    const stripCollapsed = stripH != null && stripH <= STRIP_MIN + 12
+
+    function stripDown(e: React.PointerEvent<HTMLDivElement>) {
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        dragFrom.current = { y: e.clientY, h: stripH ?? naturalH() }
+        setStripDrag(true)
+    }
+    function stripMove(e: React.PointerEvent<HTMLDivElement>) {
+        if (!stripDrag) return
+        // Up is negative in client coords and taller here, hence the subtraction.
+        const next = dragFrom.current.h - (e.clientY - dragFrom.current.y)
+        setStripH(Math.max(STRIP_MIN, Math.min(naturalH(), next)))
+    }
+    function stripUp(e: React.PointerEvent<HTMLDivElement>) {
+        setStripDrag(false)
+        e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+
 
 
     return(
         <div className="flex flex-col min-h-0 h-full">
 
-        <header className="shrink-0 flex items-center gap-2 px-5 py-3 border-b border-[var(--line)] bg-[var(--panel)]">
-                {attempts.map((a, index) => (
-                    <button
-                        key={index}
-                        onClick={() => onSelect(index)}
-                        className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[11px] transition-colors ${
-                            index === selected
-                                ? 'border-[var(--line)] bg-[var(--panel-3)] text-[var(--text)]'
-                                : 'border-transparent text-[var(--faint)] hover:text-[var(--muted)]'
-                        }`}
-                    >
-                        {/* green when that version survived the suite, red when it didn't */}
-                        <span className={`w-1.5 h-1.5 rounded-full ${a.result.all_passed ? 'bg-[var(--green)]' : 'bg-[var(--red)]'}`} />
-                        v{index + 1}
-                    </button>
-                ))}
+        {/* Tabs across the top, not down the side. An editor puts its files in a
+            row because the panel below is the subject and every pixel of width
+            spent on a rail is width taken from code — which is the one thing here
+            that cannot wrap. */}
+        <header className="shrink-0 flex items-center gap-1 px-3 py-2 border-b border-[var(--line-soft)]">
+            {([
+                ['code',    codeLines.length],
+                ['tests',   sandbox.tests.length],
+                ['console', null],
+                ['cases',   testSpec.length],
+            ] as [Tab, number | null][]).map(([key, count]) => (
+                <button
+                    key={key}
+                    onClick={() => setTab(key)}
+                    // The active tab is LIFTED, not just tinted: an inset highlight
+                    // along its top edge plus a shadow underneath, so it reads as a
+                    // card sitting above the bar rather than a differently-coloured
+                    // rectangle in it. Hovering an inactive tab previews that same
+                    // treatment at half strength, which is what makes the row feel
+                    // like a set of physical tabs rather than four text links.
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-mono text-[12.5px] transition-all duration-150 ease-out ${
+                        tab === key
+                            ? 'bg-[var(--panel-3)] text-[var(--text)] shadow-[inset_0_1px_0_rgba(255,255,255,.07),0_4px_12px_-6px_rgba(0,0,0,.9)]'
+                            : 'text-[var(--faint)] hover:-translate-y-px hover:bg-[var(--panel-3)]/55 hover:text-[var(--text)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,.04),0_4px_12px_-8px_rgba(0,0,0,.9)]'
+                    }`}
+                >
+                    {key}
+                    {count != null && <span className="text-[10.5px] text-[var(--faint)]">{count}</span>}
+                    {/* console has no count — it gets a status dot instead */}
+                    {key === 'console' && (trying || tryLog.length > 0) && (
+                        <span className={`h-1.5 w-1.5 rounded-full bg-[var(--green)] ${trying || justLanded ? 'animate-pulse' : ''}`} />
+                    )}
+                </button>
+            ))}
 
-            {/* ml-auto belongs to ONE element — it eats the free space to push
-                itself right. On every tab they'd all fight for the same space. */}
-            <div className="ml-auto flex items-center gap-1.5 font-mono text-[12.5px] text-[var(--muted)]">
-                        {attempt &&(
-                            <>
-                                {/* index -> version number happens here, once */}
-                                <span>v{selected + 1}</span>
-                                <span className="text-[var(--line)]">·</span>
-                                <span>{sandbox.total} tests</span>
-                                <span className="text-[var(--line)]">·</span>
-                                <span>
-                                    {(sandbox.duration_ms / 1000).toFixed(2)}s
-                                </span>
-                            </>
-                        ) }
+            <div className="ml-auto flex items-center gap-2">
+                {/* the verdict, stated once, where the eye already is */}
+                <span className={`font-mono text-[12px] ${sandbox.all_passed ? 'text-[var(--green)]' : 'text-[var(--red)]'}`}>
+                    {sandbox.passed}/{sandbox.total} passed
+                </span>
+
+                {/* version switch — only when there IS more than one version. A
+                    lone "v1" chip is a control that does nothing. */}
+                {attempts.length > 1 && (
+                    <span className="flex items-center gap-1 border-l border-[var(--line)] pl-2">
+                        {attempts.map((a, index) => (
+                            <button
+                                key={index}
+                                onClick={() => onSelect(index)}
+                                className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[11px] transition-colors ${
+                                    index === selected
+                                        ? 'bg-[var(--panel-3)] text-[var(--text)]'
+                                        : 'text-[var(--faint)] hover:text-[var(--muted)]'
+                                }`}
+                            >
+                                <span className={`h-1.5 w-1.5 rounded-full ${a.result.all_passed ? 'bg-[var(--green)]' : 'bg-[var(--red)]'}`} />
+                                v{index + 1}
+                            </button>
+                        ))}
+                    </span>
+                )}
             </div>
-
         </header>
 
-        {/* sidebar + panel. min-h-0 lets the panel scroll instead of stretching
-            the whole column — same trick as the chat thread. */}
-        <div className="flex-1 min-h-[420px] grid grid-cols-[132px_1fr]">
+        {/* the file strip — which artefact you are looking at, and whose it is */}
+        <div className="shrink-0 flex items-center gap-2.5 px-4 py-2 border-b border-[var(--line-soft)] bg-[var(--panel-2)]">
+            <span className="font-mono text-[12px] text-[var(--muted)]">
+                {tab === 'tests' || tab === 'cases' ? 'test_solution.py' : tab === 'console' ? 'stdout' : 'solution.py'}
+            </span>
+            <span className="rounded border border-[var(--line)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--faint)]">
+                {tab === 'console' ? 'sandbox output' : selected > 0 ? `litmus wrote this · v${selected + 1}` : 'litmus wrote this'}
+            </span>
+            <span className="ml-auto font-mono text-[10.5px] text-[var(--faint)]">
+                {(sandbox.duration_ms / 1000).toFixed(2)}s
+            </span>
+        </div>
 
-            <nav className="flex flex-col border-r border-[var(--line)] py-2">
-                {([
-                    ['code',    codeLines.length],
-                    ['tests',   sandbox.tests.length],
-                    ['console', null],
-                    ['cases',   testSpec.length],
-                ] as [Tab, number | null][]).map(([key, count]) => (
-                    <button
-                        key={key}
-                        onClick={() => setTab(key)}
-                        className={`flex items-center gap-2 border-l-2 px-4 py-2.5 font-mono text-[13px] transition-colors ${
-                            tab === key
-                                ? 'border-[var(--violet)] bg-[var(--panel-2)] text-[var(--text)]'
-                                : 'border-transparent text-[var(--faint)] hover:text-[var(--muted)]'
-                        }`}
-                    >
-                        {key}
-                        {count != null && <span className="ml-auto text-[11px] text-[var(--faint)]">{count}</span>}
-                        {/* console has no count — it gets a status dot instead.
-                            pulsing while a run is in flight or just after one lands,
-                            steady once there's output sitting there to read. */}
-                        {key === 'console' && (trying || tryLog.length > 0) && (
-                            <span
-                                className={`ml-auto h-1.5 w-1.5 rounded-full bg-[var(--green)] ${
-                                    trying || justLanded ? 'animate-pulse' : ''
-                                }`}
-                            />
-                        )}
-                    </button>
-                ))}
-            </nav>
-
-            <div className="min-w-0 min-h-0 overflow-auto">
+            {/* the panel: everything left over, and the only part that scrolls */}
+            <div className="flex-1 min-w-0 min-h-0 overflow-auto">
 
                 {/* ---- code: line-number gutter beside the highlighted source ---- */}
                 {tab === 'code' && (
@@ -378,57 +417,93 @@ export default function Result({attempts, selected, onSelect, testSource, testSp
                     </div>
                 )}
             </div>
-        </div>
-        {/* This footer sits INSIDE the bordered card that Litmus wraps us in, so it
-            only needs a top rule to separate it from the panel — a full border here
-            would double up against the card's own edge. */}
-        <footer className="shrink-0 border-t border-[var(--line)]">
-            {!sandbox.all_passed && attempt.explanation != null ? (
-                <div className="flex flex-col gap-3 border-l-2 border-l-[var(--amber)] px-5 py-4">
-                    {/* "sent back" is only TRUE when a later version exists. If this is
-                        the last attempt and still red, the run stopped here — nothing
-                        was sent anywhere. */}
-                    <span className="font-mono text-[10.5px] tracking-[0.14em] uppercase text-[var(--amber)]">
+
+        {/* ---- the results strip: pytest's own verdict, along the bottom ----
+            An IDE puts its console under the code, not in a tab beside it, so a
+            failing test is visible WHILE you read the line that caused it. The
+            "Verified — N of N in a sealed container" card that used to live here
+            said the same thing in five times the height; the strip states it in
+            one line and gives the room back to the code. */}
+        <div
+            className="shrink-0 flex flex-col overflow-hidden border-t border-[var(--line)] bg-[var(--panel-2)]"
+            style={stripH == null ? undefined : { height: stripH }}
+        >
+            {/* the grab handle — same language as the pane divider: invisible at
+                rest, violet when you reach for it, so the two resizes are visibly
+                the same gesture in two directions */}
+            <div
+                onPointerDown={stripDown}
+                onPointerMove={stripMove}
+                onPointerUp={stripUp}
+                onPointerCancel={stripUp}
+                onDoubleClick={() => setStripH(stripCollapsed ? naturalH() : STRIP_MIN)}
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize results"
+                title="Drag to resize · double-click to collapse"
+                className="group relative h-1.5 shrink-0 cursor-row-resize"
+            >
+                <span className="absolute inset-x-0 -top-[5px] -bottom-[5px]" />
+                <span className={`block h-full w-full rounded-full transition-colors duration-200 ${
+                    stripDrag ? 'bg-[var(--violet)]' : 'bg-transparent group-hover:bg-[var(--violet)]/60'
+                }`} />
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center gap-2.5 px-4 pb-2.5">
+                <span className="font-mono text-[11.5px] font-semibold text-[var(--text)]">results</span>
+                <span className="font-mono text-[11px] text-[var(--faint)]">docker</span>
+                <span className="text-[var(--line)]">·</span>
+                <span className="font-mono text-[11px] text-[var(--faint)]">no network</span>
+                <span className="text-[var(--line)]">·</span>
+                <span className="font-mono text-[11px] text-[var(--faint)]">read-only</span>
+                <span className="text-[var(--line)]">·</span>
+                <span className="font-mono text-[11px] text-[var(--faint)]">{(sandbox.duration_ms / 1000).toFixed(2)}s</span>
+
+                <span
+                    className="ml-auto rounded-md border px-2.5 py-1 font-mono text-[11px]"
+                    style={{
+                        borderColor: `color-mix(in srgb, ${sandbox.all_passed ? 'var(--green)' : 'var(--red)'} 45%, transparent)`,
+                        background:  `color-mix(in srgb, ${sandbox.all_passed ? 'var(--green)' : 'var(--red)'} 10%, transparent)`,
+                        color:       sandbox.all_passed ? 'var(--green)' : 'var(--red)',
+                    }}
+                >
+                    {sandbox.passed}/{sandbox.total} · {sandbox.all_passed ? 'all green' : `${sandbox.failed + sandbox.errors} failing`}
+                </span>
+            </div>
+
+            {/* Two columns of names. Clicking one that failed opens its traceback
+                on the tests tab — the strip is the summary, the tab is the detail,
+                and neither repeats the other. */}
+            <div ref={stripBodyRef} hidden={stripCollapsed} className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 grid content-start gap-x-8 gap-y-1 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+                {sandbox.tests.map(t => {
+                    const failed = t.outcome !== 'passed'
+                    return (
+                        <button
+                            key={t.name}
+                            onClick={() => { if (failed) { setTab('tests'); setOpen(prev => new Set(prev).add(t.name)) } }}
+                            className={`flex items-center gap-2 text-left font-mono text-[11.5px] ${
+                                failed ? 'text-[var(--red)] hover:underline' : 'text-[var(--green)] cursor-default'
+                            }`}
+                        >
+                            <span>{failed ? '×' : '✓'}</span>
+                            <span className="truncate">{t.name.split('::').pop()}</span>
+                        </button>
+                    )
+                })}
+            </div>
+
+            {/* the explanation stays — it is the half of the product that isn't
+                the code. Only ever shown on a red run, where it has something
+                to explain. */}
+            {!stripCollapsed && !sandbox.all_passed && attempt.explanation != null && (
+                <div className="flex flex-col gap-1.5 border-t border-[var(--line-soft)] border-l-2 border-l-[var(--amber)] px-4 py-3">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--amber)]">
                         {selected < attempts.length - 1 ? 'Sent back to the model' : 'Still failing — repair budget spent'}
                     </span>
-                    <p className="m-0 text-[14px] leading-relaxed text-[var(--text)]">{attempt.explanation}</p>
-                    <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-[var(--faint)]">
-                        <span className="rounded border border-[var(--line)] px-2 py-1 ">code <b className="font-semibold text-[var(--muted)]">{codeLines.length} lines</b></span>
-                        <span className="rounded border border-[var(--line)] px-2 py-1">failing <b className="font-semibold text-[var(--muted)]">{sandbox.failed + sandbox.errors}</b></span>
-                        <span className="rounded border border-[var(--line)] px-2 py-1">tests <b className="font-semibold text-[var(--muted)]">{sandbox.total}</b></span>
-                    </div>
+                    <p className="m-0 text-[13px] leading-relaxed text-[var(--text)]">{attempt.explanation}</p>
                 </div>
-            ) : (
-                <div className="flex items-center gap-5 border-l-2 border-l-[var(--green)] px-5 py-4">
-                    <div className="min-w-0">
-                        <h4 className="m-0 font-mono text-[14px] font-semibold text-[var(--text)]">
-                            Verified — {sandbox.passed} of {sandbox.total} in a sealed container
-                        </h4>
-                        {/* the repair claim is only true for v2+; on a first-try pass
-                            there was no bug to survive, so state the sandbox facts */}
-                        <p className="m-0 mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
-                            {selected > 0
-                                ? 'This version is the repair — v1 failed the suite. The code you’re taking has already survived the bug it was going to have.'
-                                : 'python:3.12-slim, no network, read straight off pytest’s own report.'}
-                        </p>
-                    </div>
-                    <div className="ml-auto shrink-0 flex items-center gap-2">
-                        <button
-                            onClick={() => handleCopy('code')}
-                            className="rounded-md bg-[var(--violet)] px-3.5 py-2 font-mono text-[12.5px] font-semibold text-white hover:bg-[var(--violet-dim)] transition-colors"
-                        >
-                            {copied === 'code' ? 'Copied' : 'Copy solution'}
-                        </button>
-                        <button
-                            onClick={() => handleCopy('tests')}
-                            className="rounded-md border border-[var(--line)] bg-[var(--panel-3)] px-3.5 py-2 font-mono text-[12.5px] text-[var(--text)] hover:border-[var(--faint)] transition-colors"
-                        >
-                            {copied === 'tests' ? 'Copied' : 'Copy tests'}
-                        </button>
-                    </div>
-                </div>
-            ) }
-        </footer>
+            )}
+        </div>
         </div>
     )
 }

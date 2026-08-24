@@ -176,6 +176,31 @@ const THINKING: Record<string, string[]> = {
     repairing:  ['reading the failures…', 'revising the solution…', 'widening the tests…'],
 }
 
+// A label that only exists on hover — the same job `title` does, without the
+// browser's ~1s delay, its unstyleable system chrome, and its habit of never
+// appearing at all on touch. An icon button is only honest if the word behind it
+// is one hover away; without that, the user is guessing at a glyph.
+//
+// `group/tip` is a NAMED group: several of these sit inside rows that already
+// use a plain `group`, and an unnamed one here would fire on the parent's hover
+// as well as its own.
+function Tip({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+        <span className="group/tip relative inline-flex">
+            {children}
+            <span
+                role="tooltip"
+                // pointer-events-none so the tooltip can never sit between the
+                // cursor and the button that summoned it — which would make the
+                // button flicker as the tooltip stole and lost the hover.
+                className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 -translate-x-1/2 translate-y-1 scale-95 whitespace-nowrap rounded-md border border-[var(--line)] bg-[var(--panel-3)] px-2 py-1 font-mono text-[10.5px] text-[var(--text)] opacity-0 shadow-[0_10px_28px_-10px_rgba(0,0,0,.95)] transition-all duration-150 ease-out group-hover/tip:translate-y-0 group-hover/tip:scale-100 group-hover/tip:opacity-100"
+            >
+                {label}
+            </span>
+        </span>
+    )
+}
+
 export default function Litmus(){
     // `problem` is the composer's DRAFT; `locked` is the problem we committed to.
     // They were one variable, but clearing the draft after submit would then blank
@@ -691,21 +716,22 @@ export default function Litmus(){
                             at rest, a split panel when you are near the edge that
                             would open it — so the corner and the edge are visibly
                             the same control reached two ways. */}
+                        <Tip label={layout === 'thread' ? 'Split the pane' : 'Collapse to full page'}>
                         <button
-                            onClick={() => setLayoutOverride(layout === 'thread' ? 'split' : 'thread')}
-                            title={layout === 'thread' ? 'Split the pane' : 'Collapse to full page'}
-                            aria-label={layout === 'thread' ? 'Split the pane' : 'Collapse to full page'}
-                            className={`hidden lg:grid place-items-center rounded-md p-1.5 transition-colors ${
-                                edgeHot ? 'bg-[var(--violet)]/15 text-[var(--violet)]'
-                                        : 'text-[var(--faint)] hover:bg-[var(--panel-3)] hover:text-[var(--text)]'
-                            }`}
-                        >
-                            {layout === 'thread' && edgeHot ? (
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>
-                            ) : (
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3v6H3M15 21v-6h6M3 9l6-6M21 15l-6 6"/></svg>
-                            )}
-                        </button>
+                                onClick={() => setLayoutOverride(layout === 'thread' ? 'split' : 'thread')}
+                                aria-label={layout === 'thread' ? 'Split the pane' : 'Collapse to full page'}
+                                className={`hidden lg:grid place-items-center rounded-md p-1.5 transition-colors ${
+                                    edgeHot ? 'bg-[var(--violet)]/15 text-[var(--violet)]'
+                                            : 'text-[var(--faint)] hover:bg-[var(--panel-3)] hover:text-[var(--text)]'
+                                }`}
+                            >
+                                {layout === 'thread' && edgeHot ? (
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>
+                                ) : (
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3v6H3M15 21v-6h6M3 9l6-6M21 15l-6 6"/></svg>
+                                )}
+                            </button>
+                        </Tip>
                     </div>
                 </header>
 
@@ -970,48 +996,78 @@ export default function Litmus(){
                         to copy — a control that appears and disappears makes the bar
                         jump every time a run finishes. */}
                     <span className="ml-auto flex items-center gap-1">
-                        <button
-                            onClick={() => copy('code')}
-                            disabled={!shown}
-                            className="rounded-md px-2.5 py-1.5 font-mono text-[11px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[var(--faint)]"
-                        >
-                            {copied === 'code' ? '✓ copied' : 'copy solution'}
-                        </button>
-                        <button
-                            onClick={() => copy('tests')}
-                            disabled={!result?.tests}
-                            className="rounded-md px-2.5 py-1.5 font-mono text-[11px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[var(--faint)]"
-                        >
-                            {copied === 'tests' ? '✓ copied' : 'copy tests'}
-                        </button>
+                        {/* Icons, not labels. Two text buttons put ~24 characters of
+                            chrome above a code panel that has to fit a signature; the
+                            title attribute carries the name for anyone who needs it,
+                            and a tick replaces the glyph for a moment on success. */}
+                        <Tip label="Copy solution">
+                            <button
+                                onClick={() => copy('code')}
+                                disabled={!shown}
+                                aria-label="Copy solution"
+                                className={`grid place-items-center rounded-md p-1.5 transition-colors hover:bg-[var(--panel-3)] disabled:opacity-30 disabled:hover:bg-transparent ${
+                                    copied === 'code' ? 'text-[var(--green)]' : 'text-[var(--faint)] hover:text-[var(--text)]'
+                                }`}
+                            >
+                                {copied === 'code' ? (
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                                ) : (
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                                )}
+                            </button>
+                        </Tip>
+                        <Tip label="Copy tests">
+                            <button
+                                onClick={() => copy('tests')}
+                                disabled={!result?.tests}
+                                aria-label="Copy tests"
+                                className={`grid place-items-center rounded-md p-1.5 transition-colors hover:bg-[var(--panel-3)] disabled:opacity-30 disabled:hover:bg-transparent ${
+                                    copied === 'tests' ? 'text-[var(--green)]' : 'text-[var(--faint)] hover:text-[var(--text)]'
+                                }`}
+                            >
+                                {copied === 'tests' ? (
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                                ) : (
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m9 12 2 2 4-4"/><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                                )}
+                            </button>
+                        </Tip>
 
                         <span className="mx-1 h-4 w-px bg-[var(--line)]" />
 
-                        <button
-                            onClick={() => setLayoutOverride(layout === 'sandbox' ? 'split' : 'sandbox')}
-                            title={layout === 'sandbox' ? 'Back to split view' : 'Expand to full page'}
-                            aria-label={layout === 'sandbox' ? 'Back to split view' : 'Expand to full page'}
-                            className="rounded-md p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
-                        >
-                            {layout === 'sandbox' ? (
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3v6H3M15 21v-6h6"/></svg>
-                            ) : (
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                            )}
-                        </button>
-                        <button
-                            onClick={() => setLayoutOverride('thread')}
-                            title="Minimise the sandbox"
-                            aria-label="Minimise the sandbox"
-                            className="rounded-md p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
-                        >
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/></svg>
-                        </button>
+                        <Tip label={layout === 'sandbox' ? 'Back to split view' : 'Expand to full page'}>
+                            <button
+                                onClick={() => setLayoutOverride(layout === 'sandbox' ? 'split' : 'sandbox')}
+                                aria-label={layout === 'sandbox' ? 'Back to split view' : 'Expand to full page'}
+                                className="rounded-md p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                            >
+                                {layout === 'sandbox' ? (
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3v6H3M15 21v-6h6"/></svg>
+                                ) : (
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                                )}
+                            </button>
+                        </Tip>
+                        <Tip label="Minimise the sandbox">
+                            <button
+                                onClick={() => setLayoutOverride('thread')}
+                                aria-label="Minimise the sandbox"
+                                className="rounded-md p-1.5 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                            >
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/></svg>
+                            </button>
+                        </Tip>
                     </span>
                 </header>
 
-                {/* stage area — the only part of this column that scrolls */}
-                <div className="flex-1 min-h-0 overflow-y-auto p-5">
+                {/* Stage area. When the IDE is up it does NOT scroll and carries no
+                    padding: the pane above is already the card, and a scrolling
+                    parent is exactly what let the results panel grow with its
+                    content instead of filling a fixed height. Every other stage is
+                    a short centred block, so it scrolls and pads as before. */}
+                <div className={`flex flex-1 min-h-0 flex-col ${
+                    stage === 'done' && result ? 'overflow-hidden' : 'overflow-y-auto p-5'
+                }`}>
 
                     {/* idle + planning + generating share the centered scanbox layout,
                         only the caption changes — so one block, dynamic text */}
@@ -1055,7 +1111,10 @@ export default function Litmus(){
                     )}
 
                     { stage === "done" && result &&(
-                        <div className="flex flex-col min-w-0 min-h-0 rounded-[11px] border border-[var(--line)] bg-[var(--panel)] overflow-hidden">
+                        /* h-full, and no border of its own: the pane wrapping this
+                           column already draws the card, and a second rounded border
+                           4px inside the first reads as a rendering bug. */
+                        <div className="flex h-full min-w-0 min-h-0 flex-col overflow-hidden">
                             <Results
                                 attempts={result.attempts}
                                 testSource={result.tests}
