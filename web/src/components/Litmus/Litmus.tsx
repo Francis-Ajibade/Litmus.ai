@@ -1,160 +1,82 @@
-import { useState, useRef, useEffect } from "react";
-import Results from "./Results";
-import BlueprintPanel, { type Blueprint } from "./Blueprint";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useNavigate, useParams } from "react-router";
+import { WORKSPACE, workspacePath } from "../../lib/routes";
+import { authHeaders } from "../../lib/api";
+import { highlight } from "../../lib/highlight";
 
+// The server's stages, copied from main/new_code.py:22. The browser never invents one.
+export type Stage = 'idle' | 'styling' | 'accepted'
+                  | 'planning' | 'approved' | 'done'
 
+// The three built-in ids, plus a saved style's uuid. `string & {}` keeps
+// autocomplete on the literals while allowing an id the server invented.
+export type StyleChoice = 'default' | 'describe or paste code' | 'choose style' | (string & {})
 
-// The blueprint is now a CONTRACT with the backend, not a loose bag of keys.
-// Record<string, unknown> was fine while we only passed it around — but the
-// moment we read fields off it to render, every field would come out as
-// `unknown` and TS would refuse to .map() or drop it into JSX.
-// These names must match the JSON keys /api/blueprint returns, exactly.
-// One row of the test list. Mirrors _build_test() in sandbox/runner.py — the
-// union on `outcome` is what lets TS catch a typo like === 'pass'.
-export type TestOutcome = {
-    name: string,
-    outcome: 'passed' | 'failed' | 'error',
-    duration_ms: number,
-    stdout: string,
-    stderr: string,
-    message: string,        // pytest's full longrepr; empty when passed
+export type ButtonChoice = "Restyle" | "Continue" | "Save & Continue"
+
+export type StyleChoiceItem = {
+    id: StyleChoice
+    label: string
+    hint: string
+    off?: boolean
 }
 
-export interface SandboxResult {
-    ok: boolean,
-    timed_out: boolean,
-    exit_code: number | null,
-    passed: number,
-    failed: number,
-    errors: number,
-    total: number,
-    duration_ms: number,
-    tests: TestOutcome[],
-    captured_stdout: string,
-    captured_stderr: string,
-    log: string,
-    all_passed : boolean,
-}
-export type Attempt = {
-            code : string,
-            explanation : string | null,
-            result : SandboxResult,
-}
 
-// One line of the REPL scrollback. Mirrors what POST /api/try returns.
-export type TryEntry = {
-    expression: string
-    output: string
-    ok: boolean
-    timed_out: boolean
-    duration_ms: number
-}
+// "Save & Continue" is in the type but not offered yet — it needs the styles
+// table and its picker, and a saved style is a write nothing can read back.
+const BUTTON_CHOICES: {id: ButtonChoice, hint: string}[] = [
+    {id: "Restyle", hint: 'change it, or go back on this'},
+    {id: "Continue", hint: 'keep this style and move on'},
+    {id: "Save & Continue", hint: " Save the style and move on "}
+]
 
-// One approved case from the blueprint. Same shape as Blueprint.required_test_cases —
-// the run response hands these back so the results panel doesn't need the blueprint.
-export type TestCase = {
-    description: string
-    input: string
-    expected: string
-    // Runnable Python that exercises THIS case — one expression for a plain
-    // function, several lines for anything needing setup (a class, say).
-    // Optional: blueprints made before this field existed won't have it, so the
-    // prefill falls back to assembling entry_point(input).
-    call?: string
-}
 
-// Blueprint moved to ./Blueprint alongside the component that renders it — the
-// type and its only consumer live together, and it's re-exported here so nothing
-// else has to know where it went.
-export type { Blueprint }
-
-  type RunResponse = {
-    tests: string
-    // the blueprint's required_test_cases passed straight through, unflattened —
-    // the UI reads these as fields, the test model gets a formatted string built
-    // from the same source (see test_spec_from_blueprint).
-    test_spec : TestCase[]
-    attempts : Attempt[]
-  }
-// One variable that can only ever hold ONE legal value, instead of a pile of
-// booleans that let illegal combos like (loading && done) both be true.
-// 'styling' = the three options are on screen, waiting for a click.
-// 'awaiting_style' = they picked one that needs typing, so the composer is the input.
-// Both sit BEFORE any model call, which is why Pipeline treats them as Blueprint-pending.
-export type Stage = 'idle' | 'styling' | 'awaiting_style' | 'planning' | 'blueprint'
-                  | 'generating' | 'verifying' | 'repairing' | 'done' 
-
-//It forces any function that returns a RunResult to always include the counts and the overall pass/fail flag.
-//TypeScript will give you autocomplete and catch mistakes (e.g. forgetting total or putting a string in passed).
-//The optional explanation lets you attach a message only when needed.
-
-type StyleChoice = 'default' | 'own' | 'extend'
 
 // One entry in the chat log. role decides which side + styling it renders on.
-// `options` turns a litmus message into a question; `chosen` records the answer,
-// which is what disables the other buttons and marks the one that was picked.
-// Keeping the question in the thread (rather than collapsing it) means scrolling
-// back still shows that a decision point existed, and what the alternatives were.
-type Msg = {
+export type Msg = {
     role: 'user' | 'litmus'
     text: string
-    options?: StyleChoice[]
-    chosen?: StyleChoice
+    pasted?: string
+    options? : StyleChoiceItem[]
+    choices ?: ButtonChoice[]
+}
+
+// A paste past either of these stops being something you read in a 2-row box.
+const PASTE_LINES = 6
+const PASTE_CHARS = 400
+
+// A reply past either of these stops being something you skim in the thread.
+const REPLY_LINES = 12
+const REPLY_CHARS = 700
+
+// Long replies keep a lead line in the thread and park the rest in a card.
+function splitReply(text: string): [string, string | null] {
+    if (text.length <= REPLY_CHARS && text.split('\n').length <= REPLY_LINES) return [text, null]
+    const para = text.indexOf('\n\n')
+    if (para > 0 && para <= REPLY_CHARS) return [text.slice(0, para).trim(), text.slice(para).trim()]
+    const stop = text.slice(0, REPLY_CHARS).lastIndexOf('. ')
+    if (stop > 40) return [text.slice(0, stop + 1).trim(), text.slice(stop + 1).trim()]
+    return ['Here is what I changed \u2014 open the card to read it.', text]
 }
 
 const API_URL = import.meta.env.VITE_API_URL;
 
 // fetch only rejects on a NETWORK-level failure (DNS, refused connection, CORS).
-// A 429 is a perfectly successful round-trip, so nothing throws on its own —
-// checking response.ok and throwing is what routes it into the catch blocks.
-// Returning `never` tells TS this always throws, so callers don't need `throw`
-// in front of it and the code after the if-block still narrows correctly.
-// Instead of finishing normally, a function with a never type will always crash, stop the program, or run forever.
 function throwForStatus(response: Response, label: string): never {
     if (response.status === 429) {
-        // Seconds remaining, set by slowapi's 429 handler. This is only readable
-        // because the API lists Retry-After in the CORS expose_headers — without
-        // that the browser strips it and .get() returns null.
+        // Seconds remaining, set by slowapi's 429 handler.
         const seconds = Number(response.headers.get('Retry-After'))
         const minutes = Math.ceil(seconds / 60)
         const wait =
             !Number.isFinite(seconds) || seconds <= 0 ? 'a little while'
             : seconds < 60 ? 'under a minute'
             : `about ${minutes} minute${minutes === 1 ? '' : 's'}`
-        // Deliberately not "today" — every limit on this API is per hour.
         throw new Error(`You've hit the usage limit. Try again in ${wait}.`)
     }
     throw new Error(`${label} (${response.status})`)
 }
 
-// How long the bar sits on "Generate" before flipping to "Verify". This is a
-// guess, not a measurement — the backend returns once, at the end. Tune it after
-// timing a real run: generation is the long pole, the sandbox is only seconds.
-const GENERATING_MS = 18_000;
-
-// The three answers, and the copy for each. Labels stay short; the hint is the
-// consequence, so nobody has to guess what a choice does.
-const STYLE_OPTIONS: Record<StyleChoice, { label: string; hint: string }> = {
-    default: { label: 'Stick with the default',      hint: 'idiomatic PEP 8 — no extra instructions' },
-    own:     { label: 'Specify my own style',        hint: 'replaces the default entirely' },
-    extend:  { label: 'Add my style to the default', hint: 'PEP 8, with your overrides on top' },
-}
-
-// PEP 8's sections don't change, so this is a constant rather than a model call:
-// generating a fixed list would cost latency and money to produce something
-// slightly different every time.
-const PEP8_AREAS = [
-    'naming (snake_case functions, CAPS constants)',
-    'indentation and line length',
-    'import order and grouping',
-    'whitespace around operators and arguments',
-    'comments and docstrings',
-    'type hints',
-]
-
-// Tips under the sandbox caption. The slot used to hold one static line about
-// the container — true, but it only ever said the box was empty. These teach
-// what the app can do while nothing is running, and they loop.
+// Tips under the sandbox caption, rotating while nothing is running.
 const TIPS = [
     'click a case to run it with your own input',
     'switch between v1 and v2 to see what the repair changed',
@@ -166,9 +88,9 @@ const TIPS = [
 ]
 const TIP_MS = 4200
 
-// phrases the "thinking" indicator cycles through per phase, to fake the feel of
-// the model streaming its work back. Purely cosmetic — no real tokens involved.
+// Phrases the "thinking" indicator cycles through, one set per phase.
 const THINKING: Record<string, string[]> = {
+    idle:       ['reading your problem…', 'checking there is something here to build…'],
     planning:   ['reading the problem…', 'sketching the contract…', 'naming the traps a grader would set…'],
     revising:   ['folding in your note…', 'reworking the plan…'],
     generating: ['writing the solution…', 'generating tests from the traps…', 'sealing the sandbox…'],
@@ -176,23 +98,250 @@ const THINKING: Record<string, string[]> = {
     repairing:  ['reading the failures…', 'revising the solution…', 'widening the tests…'],
 }
 
-// A label that only exists on hover — the same job `title` does, without the
-// browser's ~1s delay, its unstyleable system chrome, and its habit of never
-// appearing at all on touch. An icon button is only honest if the word behind it
-// is one hover away; without that, the user is guessing at a glyph.
-//
-// `group/tip` is a NAMED group: several of these sit inside rows that already
-// use a plain `group`, and an unnamed one here would fire on the parent's hover
-// as well as its own.
+
+// Generic used to type check making sure T is a subset of StyleChoice
+// this is used so that an id is unique to each list item 
+// so wheneever you try and edit it to something else it is flagged 
+function OptionRow<T extends string>({ id, label, hint, off, active, locked, delay, onPick }: {
+    id: T
+    label: string
+    hint?: string
+    off?: boolean
+    active?: boolean
+    locked?: boolean
+    delay?: number
+    onPick: (id: T) => void
+}) {
+    const disabled = off || locked
+    return (
+        <button
+            onClick={() => onPick(id)}
+            disabled={disabled}
+            aria-pressed={active}
+            // The rows arrive one after another rather than as a block. `both` on
+            // the fade-in keyframes holds them invisible until their turn.
+            style={delay ? { animationDelay: `${delay}ms` } : undefined}
+            className={`fade-in flex w-full flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed ${
+                active
+                    ? 'border-[var(--pick)] bg-[var(--pick)]/8'
+                    : off
+                        ? 'border-[var(--line-soft)] opacity-40'
+                        : locked
+                            ? 'border-[var(--line-soft)] opacity-50'
+                            : 'border-[var(--line)] bg-[var(--panel-2)] hover:border-[var(--pick-dim)]'
+            }`}
+        >
+            <span className={`font-mono text-[12.5px] ${active ? 'text-[var(--pick)]' : 'text-[var(--text)]'}`}>
+                {active ? '\u2713 ' : ''}{label}
+            </span>
+            {hint && <span className="font-mono text-[11px] text-[var(--faint)]">{hint}</span>}
+        </button>
+    )
+}
+
+
+
+
+// A long paste, parked as an attachment instead of flooding the composer.
+// Click to read it in full; onRemove is only passed while it is still editable —
+// in the thread it is history and there is nothing to remove.
+function PastedCard({ text, onOpen, onRemove, label = 'PASTED', prose }: {
+    text: string
+    onOpen: () => void
+    onRemove?: () => void
+    label?: string
+    prose?: boolean
+}) {
+    const lines = text.split('\n').length
+    return (
+        <div className="relative w-[230px] rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3">
+            <button
+                onClick={onOpen}
+                className="block w-full text-left"
+                aria-label="Open pasted content"
+            >
+                {/* break-all, not truncate: a wall of wrapped text reads as "there is
+                    a lot here", which a single ellipsised line does not. */}
+                <p className={`m-0 h-[92px] overflow-hidden text-[var(--faint)] leading-[1.55] ${
+                    prose ? 'text-[12px]' : 'break-all font-mono text-[11.5px]'
+                }`}>
+                    {text}
+                </p>
+                <span className="mt-2.5 inline-block rounded-md border border-[var(--line)] px-2 py-0.5 font-mono text-[10.5px] tracking-[0.08em] text-[var(--muted)]">
+                    {label} · {lines} lines
+                </span>
+            </button>
+            {onRemove && (
+                <button
+                    onClick={onRemove}
+                    aria-label="Remove pasted content"
+                    className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full border border-[var(--line)] bg-[var(--panel-3)] text-[var(--faint)] transition-colors hover:border-[var(--red)] hover:text-[var(--red)]"
+                >
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            )}
+        </div>
+    )
+}
+
+// The expanded read. Fixed to the viewport rather than the pane so it sits above
+// everything, including the sandbox and the header.
+function PastedOverlay({ text, onClose, label = 'PASTED', prose }: {
+    text: string
+    onClose: () => void
+    label?: string
+    prose?: boolean
+}) {
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [onClose])
+
+    return (
+        <div
+            onClick={onClose}
+            className="fade-in fixed inset-0 z-50 grid place-items-center bg-black/70 p-6 backdrop-blur-[2px]"
+        >
+            <div
+                onClick={(e) => e.stopPropagation()}
+                className="flex max-h-[80vh] w-full max-w-[760px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] shadow-[0_24px_70px_-20px_rgba(0,0,0,.9)]"
+            >
+                <div className="flex items-center gap-2 border-b border-[var(--line-soft)] bg-[var(--panel-2)] px-4 py-2.5">
+                    <span className="font-mono text-[10.5px] tracking-[0.08em] text-[var(--muted)]">{label}</span>
+                    <span className="font-mono text-[10.5px] text-[var(--faint)]">{text.split('\n').length} lines</span>
+                    <button
+                        onClick={onClose}
+                        aria-label="Close"
+                        className="ml-auto rounded-md p-1 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                    >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                {prose ? (
+                    <p className="m-0 overflow-auto whitespace-pre-line p-4 text-[13.5px] leading-[1.7] text-[var(--text)]">{text}</p>
+                ) : (
+                    <pre className="m-0 overflow-auto p-4 font-mono text-[12.5px] leading-[1.62] text-[var(--text)]">{text}</pre>
+                )}
+            </div>
+        </div>
+    )
+}
+
+type SavedStyle = { style_id: string; title: string; description: string | null; updated_at: string }
+type SavedStyleDetail = SavedStyle & { sample_code: string | null }
+// The list rides along into the detail view, so Esc can go back without a refetch.
+type StyleView =
+    | { view: 'list'; styles: SavedStyle[] | null }
+    | { view: 'detail'; styles: SavedStyle[]; style: SavedStyleDetail }
+
+function ago(iso: string) {
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+    if (days <= 0) return 'today'
+    if (days === 1) return 'yesterday'
+    if (days < 30) return `${days} days ago`
+    const months = Math.floor(days / 30)
+    return months === 1 ? 'a month ago' : `${months} months ago`
+}
+
+function StyleOverlay({ view, onOpen, onBack, onClose, onAccept }: {
+    view: StyleView
+    onOpen: (id: string) => void
+    onBack: () => void
+    onClose: () => void
+    onAccept: (id: string) => void
+}) {
+    const detail = view.view === 'detail'
+
+    // Esc steps back one level: detail -> list -> closed.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') (detail ? onBack : onClose)() }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [detail, onBack, onClose])
+
+    return (
+        <div
+            onClick={onClose}
+            className="fade-in fixed inset-0 z-50 grid place-items-center bg-black/70 p-6 backdrop-blur-[2px]"
+        >
+            <div
+                onClick={(e) => e.stopPropagation()}
+                className="flex max-h-[80vh] w-full max-w-[680px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] shadow-[0_24px_70px_-20px_rgba(0,0,0,.9)]"
+            >
+                <div className="flex items-center gap-2 border-b border-[var(--line-soft)] bg-[var(--panel-2)] px-3 py-2.5">
+                    <button
+                        onClick={detail ? onBack : onClose}
+                        aria-label={detail ? 'Back to saved styles' : 'Close'}
+                        className="rounded-md p-1 text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                    >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                    <span className="truncate font-mono text-[10.5px] tracking-[0.08em] text-[var(--muted)]">
+                        {detail ? view.style.title : 'SAVED STYLES'}
+                    </span>
+                </div>
+
+                {detail ? (
+                    <>
+                        <div className="min-h-0 flex-1 overflow-auto">
+                            <div className="px-4 pt-4">
+                                <span className="font-mono text-[10.5px] text-[var(--faint)]">saved {ago(view.style.updated_at)}</span>
+                                {view.style.description && (
+                                    <p className="m-0 mt-2 whitespace-pre-line text-[13.5px] leading-[1.65] text-[var(--text)]">
+                                        {view.style.description}
+                                    </p>
+                                )}
+                            </div>
+                            <pre className="m-4 overflow-auto rounded-lg border border-[var(--line-soft)] bg-[var(--panel-2)] p-4 font-mono text-[12.5px] leading-[1.62] text-[var(--text)]">
+                                <code dangerouslySetInnerHTML={{ __html: highlight(view.style.sample_code ?? '') }} />
+                            </pre>
+                        </div>
+                        <div className="flex justify-end border-t border-[var(--line-soft)] px-4 py-3">
+                            <button
+                                onClick={() => onAccept(view.style.style_id)}
+                                className="rounded-lg bg-[var(--violet)] px-4 py-1.5 text-[13px] font-semibold text-white transition hover:brightness-110"
+                            >
+                                Accept
+                            </button>
+                        </div>
+                    </>
+                ) : (
+                    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
+                        {view.styles === null ? (
+                            <div className="dots self-center py-6" aria-label="loading"><i /><i /><i /></div>
+                        ) : view.styles.map((st, i) => (
+                            <button
+                                key={st.style_id}
+                                onClick={() => onOpen(st.style_id)}
+                                style={{ animationDelay: `${i * 60}ms` }}
+                                className="slide-in-left w-full rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-3.5 py-3 text-left transition-colors hover:border-[var(--violet)]"
+                            >
+                                <div className="flex items-baseline justify-between gap-3">
+                                    <span className="truncate font-mono text-[13px] text-[var(--text)]">{st.title}</span>
+                                    <span className="shrink-0 font-mono text-[10.5px] text-[var(--faint)]">{ago(st.updated_at)}</span>
+                                </div>
+                                {st.description && (
+                                    // Clipped and faded, so the row invites a click rather than being read in full.
+                                    <p className="m-0 mt-1.5 max-h-[2.9em] overflow-hidden text-[12.5px] leading-[1.45] text-[var(--muted)] [mask-image:linear-gradient(to_bottom,black_50%,transparent)]">
+                                        {st.description}
+                                    </p>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
 function Tip({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <span className="group/tip relative inline-flex">
             {children}
             <span
                 role="tooltip"
-                // pointer-events-none so the tooltip can never sit between the
-                // cursor and the button that summoned it — which would make the
-                // button flicker as the tooltip stole and lost the hover.
                 className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 -translate-x-1/2 translate-y-1 scale-95 whitespace-nowrap rounded-md border border-[var(--line)] bg-[var(--panel-3)] px-2 py-1 font-mono text-[10.5px] text-[var(--text)] opacity-0 shadow-[0_10px_28px_-10px_rgba(0,0,0,.95)] transition-all duration-150 ease-out group-hover/tip:translate-y-0 group-hover/tip:scale-100 group-hover/tip:opacity-100"
             >
                 {label}
@@ -202,422 +351,306 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 export default function Litmus(){
-    // `problem` is the composer's DRAFT; `locked` is the problem we committed to.
-    // They were one variable, but clearing the draft after submit would then blank
-    // the problem that run()/revise() still send — and the backend uses it as the
-    // anchor for repair_code and explain_failure, so it would degrade silently.
+    // `problem` is the composer's draft; `lockedProblem` is what we committed to.
     const [problem, setProblem] = useState('')
+    // The URL owns which session this is; state holds it for the gap between the
+    // server minting an id and the navigate that puts it in the URL.
+    const { sessionId } = useParams()
+    const navigate = useNavigate()
+    const [session_id, setSessionId] = useState<string | null>(sessionId ?? null)
     const [lockedProblem, setLockedProblem] = useState('')
     const [style, setStyle] = useState('')
-    const [ blueprint, setBlueprint] = useState<Blueprint | null>(null)
-    const [selected, setSelected] = useState<number | null>(null)
-    // the case whose input is currently loaded in the composer. null = not in
-    // try mode. This is the ONLY thing that puts the composer into try mode, so
-    // clearing it is how we leave.
-    const [testSelected, setTestSelected] = useState<TestCase | null>(null)
-    // REPL scrollback. Appending (not replacing) is the point — trying three
-    // inputs is only useful if you can compare them.
-    const [tryLog, setTryLog] = useState<TryEntry[]>([])
-    const [trying, setTrying] = useState(false)
-    // submit is a network call now, so it needs its own in-flight flag — `busy` is
-    // derived from stage, and this check happens while the stage is still 'idle'.
+    // Submit is a network call, so it needs its own flag — `busy` is derived from stage.
     const [checking, setChecking] = useState(false)
+    const [ code, setCode ] = useState<string | null>(null)
+    const [ diff, setDiff ] = useState<string | null>(null)
+    const [ restyling, setRestyling ] = useState(false)
+    const [picked, setPicked] = useState<StyleChoice>('default')
+    // The attachment waiting to be sent, and whichever one is open for reading.
+    const [pasted, setPasted] = useState<string | null>(null)
+    const [expanded, setExpanded] = useState<{ text: string; label?: string; prose?: boolean } | null>(null)
+    // The saved-style overlay: null when shut, otherwise which level is showing.
+    const [styleView, setStyleView] = useState<StyleView | null>(null)
+
+    // The buttons chosen in order to go to the next stage 
+    const [button, setButton] = useState<ButtonChoice | null>(null)
+
+    const highlighted = useMemo(() => highlight(code ?? ''), [code])
 
     // ── layout ────────────────────────────────────────────────────────────
-    // Three states, not a boolean: the thread alone, both panes, or the sandbox
-    // alone. `null` means "follow the stage" — the override exists only to let
-    // someone disagree with the automatic choice for as long as that stage lasts.
     const [layoutOverride, setLayoutOverride] = useState<'thread' | 'split' | 'sandbox' | null>(null)
     const [leftPct, setLeftPct] = useState(42)
     const [dragging, setDragging] = useState(false)
-    // True while the cursor is within a few pixels of the right edge. The edge is
-    // the affordance: there is no divider to grab in full-page mode, so the page
-    // has to volunteer that one is available.
+    // True while the cursor is near the right edge — the only affordance in thread mode.
     const [edgeHot, setEdgeHot] = useState(false)
     const shellRef = useRef<HTMLDivElement>(null)
-    const [feedback, setFeedback] = useState('')
-    // <RunResult | null>TypeScript generic – the state can be either a RunResult or null(
-    // (null)Initial value – the state starts as null
-    const [result, setResult] = useState<RunResponse | null>(null)
     const [stage, setStage] = useState<Stage>('idle')
     const [errorMsg, setErrorMsg] = useState("")
-    // the chat log — user + litmus messages, interleaved in the order they happened.
-    // state, not ref — appending must re-render for the new bubble to appear.
+    // The chat log — user and litmus messages, in the order they happened.
     const [messages, setMessages] = useState<Msg[]>([])
     const [tick, setTick] = useState(0)   // drives the rotating thinking phrase
     const [tipIndex, setTipIndex] = useState(0)   // drives the looping tips
-    // an empty div pinned to the bottom of the thread; we scroll it into view on
-    // every new message so the log follows the conversation like a normal chat.
+    // An empty div pinned to the bottom of the thread, scrolled into view on each message.
     const bottomRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [messages, stage])
 
-    // One interval for the whole session — deliberately NOT keyed on stage, so
-    // the tips keep their rhythm instead of restarting from the top every time
-    // the pipeline moves. The panel it renders in is conditional; the timer isn't.
     useEffect(() => {
         const id = setInterval(() => setTipIndex(i => (i + 1) % TIPS.length), TIP_MS)
         return () => clearInterval(id)
     }, [])
 
-    // styleOverride exists because setState is NOT synchronous: a caller that does
-    // setStyle(x) then getBlueprint() would still send the PREVIOUS style, since
-    // this closure captured it at render time. Passing the value sidesteps that.
-    async function getBlueprint (styleOverride?: string) {
-        const useStyle = styleOverride ?? style
-// when getting blueprint user sends request based on problem 
-// anytime user changes or sends a feedback the function is called 
-// the api backend returns the bp / updated bp
-        setStage('planning');   // was setLoading(true) — now we name WHERE we are
-        setErrorMsg('');
-        try{
-            const response = await fetch(`${API_URL}/api/blueprint`,{
-                method: 'POST',
-                headers : {'Content-Type' : 'application/json'},
-                body: JSON.stringify({problem: lockedProblem, style: useStyle, prior:blueprint, feedback})
-            })
-
-            if(!response.ok){
-                throwForStatus(response, 'Blueprint request failed');
-            }
-
-            const data = await response.json();
-
-            if (data.declined  == true ) {
-                setStage('idle')
-                setMessages(m => [...m,
-                    { role: 'user',   text: lockedProblem },
-                    { role: 'litmus', text: data.message,
-                    },
-                ])
-            }
-
-            else{
-            setBlueprint(data)
-            setStage('blueprint')   // success has its own destination
-            setFeedback('')         // consumed — clear it so the next revise starts empty
-            }
-            
-        }catch(err){
-            console.log(err);
-            setErrorMsg (err instanceof Error ? err.message: "something went wrong");
-            // failure sends us back so the composer stays usable and the card doesn't show
-            setStage(blueprint ? 'blueprint' : 'idle')
-        }
-        // No finally: each path already sets its own stage. With a machine there's
-        // no single "always reset to false" line to put here.
-    }
-
-    async function run(){
-        // stage is owned by lockIn (see the timer there) — setting it here would
-        // land in the same React batch and clobber 'generating' before it renders.
-        setErrorMsg("");
-        setSelected(null);
-        setResult(null)
-        try{
-            const response = await fetch (`${API_URL}/api/run`,{
-                method:"POST",
-                headers : {'Content-Type' : 'application/json'},
-                body: JSON.stringify({
-                    problem: lockedProblem, style, blueprint
-                })
-            })
-            if(!response.ok){
-                throwForStatus(response, 'Run failed');
-
-            }
-            const data  = await response.json();
-            setResult(data);
-            setStage('done');
-        }catch(err){
-            console.log(err);
-            setErrorMsg(err instanceof Error ? err.message: 'Something went wrong');
-            setStage('blueprint');
-        }
-    }
-
-    // Runs whatever is in the composer against the code already on screen.
-    // Takes no argument on purpose: at submit time the truth is the edited text,
-    // not the case that seeded it — the user may have changed every character.
-    async function runTestCase(){
-        const expression = problem.trim()
-        if (!expression || trying || !result) return
-        const shown = result.attempts[shownIndex]
-        setTrying(true)
-        setErrorMsg('')
-        try {
-            const response = await fetch(`${API_URL}/api/try`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    // the code the user is LOOKING AT, not a regenerated one
-                    code: shown.code,
-                    expression,
-                }),
-            })
-            if (!response.ok) throwForStatus(response, 'Try failed')
-            const data: TryEntry = await response.json()
-            setTryLog(l => [...l, data])
-            setProblem('')          // clear the draft, keep the log
-        } catch (err) {
-            console.log(err)
-            setErrorMsg(err instanceof Error ? err.message : 'Something went wrong')
-        } finally {
-            setTrying(false)
-        }
-    }
-
     // Derived from stage — never their own useState, or they'd drift out of sync.
-    const busy = stage === 'planning'                       // waiting on a blueprint
-    // `testSelected` is the escape hatch: 'done' normally freezes the composer,
-    // but try mode reuses that same box AFTER a run, so it has to unfreeze.
-    const locked = (stage === 'generating' || stage === 'verifying'
-                || stage === 'repairing' || stage === 'done'   // building — composer frozen
-                || stage === 'styling')                        // must answer the question first
-                && testSelected === null
-    // the composer does double duty: normally it takes the problem, but after a
-    // 'own'/'extend' pick it takes the style instead.
-    const composingStyle = stage === 'awaiting_style'
+    const busy = stage === 'planning'
+    
+    const describing = stage === 'styling' && picked === 'describe or paste code'
+    const locked = !(stage === 'idle' || describing) || restyling
 
+  
 
-    // Step 1: check the input is even a coding problem, then commit it and ASK about
-    // style before spending a model call. Nothing is generated here — the blueprint
-    // waits until style is settled, so it gets written once with the right
-    // instructions instead of twice.
-    //
-    // The check has to happen HERE and not deeper in the pipeline. Everything below
-    // this line is local state: the style question costs nothing and reaches no
-    // model, so a guard further in would still have asked someone how they'd like
-    // their weather question formatted before turning them away.
-    async function submitProblem(){
-        if (!problem.trim() || busy || checking) return
+    // Which session the thread on screen already shows, so the effect doesn't
+    // re-fetch one send() just populated. Starts null even when the URL has an
+    // id: a fresh mount shows nothing yet, and seeding it would skip the fetch.
+    const hydrated = useRef<string | null>(null)
 
+    function clearSession() {
+        hydrated.current = null
+        setSessionId(null)
+        setMessages([])
+        setStage('idle')
+        setCode(null)
+        setDiff(null)
+    }
+
+    // Keyed on the param, not on mount: switching sessions from the sidebar
+    // re-renders this same component instead of remounting it.
+    useEffect(() => {
+        if (!sessionId) {
+            clearSession()
+            return
+        }
+
+        if (hydrated.current === sessionId) return
+
+        let cancelled = false
+        setSessionId(sessionId)
         setErrorMsg('')
-        setChecking(true)
-        let declined: { message?: string } | null = null
-        try {
-            const response = await fetch(`${API_URL}/api/check`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ problem }),
-            })
-            // Fails open, exactly like the backend does: if the checker is
-            // unreachable the submission proceeds unguarded rather than stranding
-            // someone with a real question behind a service they can't see.
-            if (response.ok) {
+
+        ;(async () => {
+            try {
+                const response = await fetch(`${API_URL}/api/session/${sessionId}`, {
+                    headers: await authHeaders(),
+                })
+                if (cancelled) return
+                // Dead or not ours. Drop back to an empty workspace rather than
+                // stranding the user on a session that can never load.
+                if (response.status === 404) {
+                    clearSession()
+                    navigate(WORKSPACE, { replace: true })
+                    setErrorMsg('That conversation is no longer on the server — start over.')
+                    return
+                }
+                if (!response.ok) throwForStatus(response, 'Could not open that session')
                 const data = await response.json()
-                if (data.declined) declined = data
+                if (cancelled) return
+                hydrated.current = sessionId
+                setMessages(data.msgs)
+                setStage(data.stage)
+                setCode(data.code)
+                setDiff(data.diff)
+            } catch (err) {
+                if (cancelled) return
+                setErrorMsg(err instanceof Error ? err.message : 'Something went wrong')
             }
+        })()
+
+        // A fast second switch must not let the first response overwrite it.
+        return () => { cancelled = true }
+    }, [sessionId])
+
+    async function send(new_event: {kind: string, text: string, type ? : string , code_pasted ? : string | null, }){
+        setChecking(true)
+        setErrorMsg('')
+        try {
+            const response = await fetch(`${API_URL}/api/chat`, {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({event: new_event, session_id: session_id}),
+            })
+            // Not retryable: the server restarted and its in-memory store is empty,
+            // so this session_id will 404 forever. Drop it and start clean.
+            if (response.status === 404) {
+                clearSession()
+                navigate(WORKSPACE, { replace: true })
+                setErrorMsg('That conversation is no longer on the server — start over.')
+                return
+            }
+            if (!response.ok) throwForStatus(response, 'Chat failed')
+            const data = await response.json()
+            setSessionId(data.session_id)
+            // replace, not push — Back should leave the workspace, not step
+            // between the empty one and this session.
+            if (data.session_id && data.session_id !== sessionId) {
+                hydrated.current = data.session_id
+                navigate(workspacePath(data.session_id), { replace: true })
+            }
+            setStage(data.stage)
+            setCode(data.code)
+            setDiff(data.diff)
+            setMessages(m => [...m, ...data.msgs])
         } catch (err) {
-            console.log('check unavailable, proceeding:', err)
+            setErrorMsg(err instanceof Error ? err.message : 'Something went wrong')
+            console.log(err)
         } finally {
             setChecking(false)
         }
-
-        if (declined) {
-            // A decline is something Litmus SAYS, not an error — errorMsg would
-            // paint failure chrome on a perfectly reasonable off-topic question.
-            setMessages(m => [...m, {
-                role: 'litmus',
-                text: declined.message ?? 'I help with coding problems — try pasting a coding question, an assignment, or the code that\'s breaking.',
-            }])
-            // No stage change and no setProblem(''): nothing was committed, so the
-            // composer keeps their text to edit instead of making them retype it.
-            return
-        }
-
-        setLockedProblem(problem)
-        setMessages(m => [...m,
-            { role: 'user',   text: problem },
-            { role: 'litmus', text: 'Before I draft anything — how should the code be styled?',
-              options: ['default', 'own', 'extend'] },
-        ])
-        setProblem('')          // clear the DRAFT only; lockedProblem holds the real one
-        setStage('styling')
     }
 
-    // Step 2: they picked. Mark the question answered (which disables the buttons),
-    // then either go straight to the blueprint or ask them to type.
-    function chooseStyle(choice: StyleChoice){
-        if (stage !== 'styling') return         // a stale question can't be re-answered
-        setMessages(m => m.map(msg =>
-            msg.options && msg.chosen === undefined ? { ...msg, chosen: choice } : msg
-        ))
-        if (choice === 'default') {
-            setStyle('')                        // no instruction == idiomatic PEP 8
-            setMessages(m => [...m, { role: 'litmus', text: 'Default it is. Reading the problem and drafting a contract before I write anything.' }])
-            getBlueprint('')                    // pass it — setStyle hasn't landed yet
+    function handleClick(btn : ButtonChoice){
+        // 3 button cases to handle 
+        // Restyle, Save & Continue , Continue 
+        if (btn === "Restyle"){
+            // no new state: `describing` is derived from picked, so pointing it at
+            // the describe id is what re-opens the composer
+            setPicked('describe or paste code')
+            send({kind: "action", text: "describe or paste code"})
             return
-        }
-        setMessages(m => [...m, {
-            role: 'litmus',
-            text: choice === 'own'
-                ? 'Describe your style in the box below — naming, headers, comments, whatever matters. It replaces the default.'
-                : `PEP 8 covers:\n${PEP8_AREAS.map(a => `  · ${a}`).join('\n')}\n\nTell me below which of those to override, and what to do instead.`,
-        }])
-        setStage('awaiting_style')
+        }        
+        
+        // the id itself — the server needs to tell Continue from Save & Continue
+        send({ kind: 'action', text: btn.toLowerCase() })
     }
 
-    // Step 3 (only for 'own' / 'extend'): whatever they typed becomes the style.
-    function submitStyle(){
-        if (!problem.trim()) return
+    async function openStyles() {
+        setStyleView({ view: 'list', styles: null })
+        try {
+            const r = await fetch(`${API_URL}/api/styles`, { headers: await authHeaders() })
+            if (!r.ok) throwForStatus(r, 'Could not load your styles')
+            setStyleView({ view: 'list', styles: await r.json() })
+        } catch (err) {
+            setStyleView(null)
+            setErrorMsg(err instanceof Error ? err.message : 'Something went wrong')
+        }
+    }
+
+    async function openStyle(id: string) {
+        const styles = styleView?.styles ?? []
+        try {
+            const r = await fetch(`${API_URL}/api/styles/${id}`, { headers: await authHeaders() })
+            if (!r.ok) throwForStatus(r, 'Could not open that style')
+            setStyleView({ view: 'detail', styles, style: await r.json() })
+        } catch (err) {
+            setErrorMsg(err instanceof Error ? err.message : 'Something went wrong')
+        }
+    }
+
+    function acceptStyle(id: string) {
+        setStyleView(null)
+        setPicked('choose style')
+        send({ kind: 'action', text: id })
+    }
+
+    function handlePick(id : StyleChoice){
+        // Opening the saved list is a read, not a turn — no chat call.
+        if (id === 'choose style') {
+            openStyles()
+            return
+        }
+        setPicked(id)
+        send({kind:"action",text : id})
+    }
+
+    // Step 1: send the problem. The server classifies it and answers with a stage.
+    // A paste long enough to make the composer unreadable is parked as an
+    // attachment instead. preventDefault is what stops it also landing in the box.
+    function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+        const clip = e.clipboardData.getData('text')
+        if (clip.split('\n').length <= PASTE_LINES && clip.length <= PASTE_CHARS) return
+        e.preventDefault()
+        setPasted(clip)
+    }
+
+    async function submitProblem(){
+        if ((!problem.trim() && !pasted) || busy || checking || restyling) return
         const text = problem
-        // the chosen option is the last answered question in the thread
-        const choice = [...messages].reverse().find(m => m.chosen)?.chosen
-        const nextStyle = choice === 'extend' ? `Follow PEP 8, except: ${text}` : text
-        setStyle(nextStyle)
-        setMessages(m => [...m,
-            { role: 'user',   text },
-            { role: 'litmus', text: 'Got it. Drafting the contract against your style.' },
-        ])
+        const attachment = pasted
         setProblem('')
-        getBlueprint(nextStyle)                 // pass it — setStyle hasn't landed yet
-    }
-    // Revise = same endpoint (prior + feedback), but choreographed: first flip the
-    // live pipeline to 'revising' (amber + redo) and let that ease in, THEN drop the
-    // new user message + litmus reply and refetch — so it reads as one continuous loop.
-    function revise(){
-        if (!feedback.trim() || busy) return
-        const note = feedback
-        setStage('planning')                    // revising === true, since a blueprint already exists
-        setTimeout(() => {
-            setMessages(m => [...m,
-                { role: 'user',   text: note },
-                { role: 'litmus', text: 'Revising — folding that into the plan.' },
-            ])
-            getBlueprint()
-        }, 650)
-    }
-    function lockIn(){
-        setStage('generating')
-        // One response arrives at the very end, so the browser can't know when
-        // generation stops and verification starts — we advance on a timer.
-        // The functional form only moves us on if nothing else already has: if
-        // the fetch finished (or errored) first, this is a no-op instead of
-        // dragging a done run back to 'verifying'.
-        setTimeout(() => setStage(s => s === 'generating' ? 'verifying' : s), GENERATING_MS)
-        run();
-    }              // seam into Brick 3
-
-    function sendTestinput(i : TestCase){
-        setMessages(m => [...m, 
-            {role : 'user', text :`Test ${i.description} with input ${i.input}`},
-            {role : 'litmus', text : `Loaded "${i.description}" into the composer below. Change the input to anything you want to try, then hit Run — the result appears in the Console tab.`},])
-        // `call` is written BY the model that wrote the case, so it always
-        // matches — including multi-step ones like a stack push/pop sequence,
-        // which entry_point(input) can't express at all. The assembly below is
-        // only a fallback for blueprints generated before `call` existed.
-        const fn = blueprint?.entry_point
-        setProblem(i.call ?? (fn ? `${fn}(${i.input})` : i.input))
-        setTestSelected(i)
-        // deliberately does NOT run — seeding the composer is the whole job.
-        // The user edits the value, then Run submits it.
-    }
-    // Leaves try mode WITHOUT resetting the session: the run and its results stay
-    // on screen, the composer goes back to being frozen (which is the correct
-    // state after a finished run — there's nothing to type until you start over).
-    function exitTryMode(){
-        setTestSelected(null)
-        setProblem('')
+        setPasted(null)
+        
+        if (describing) setRestyling(true)
+        // One string goes over the wire, so the attachment is labelled rather than
+        // just appended — that label is how Litmus tells a pasted sample from the
+        // sentence describing it.
+        const body = attachment
+            ? `${text}\n\n--- pasted ---\n${attachment}`
+            : text
+        try {
+        
+            await send({ kind: 'message', text: body , type : describing ? "Restyling" : undefined , code_pasted : describing ? attachment : undefined})
+        } finally {
+            setRestyling(false)
+        }
     }
 
-    // A full reset back to the empty app. Every piece of session state is listed
-    // here on purpose: this is the one place that has to know the complete set,
-    // and a forgotten field would leak the old run into the new one (a stale
-    // blueprint is the worst of them — getBlueprint would send it as `prior` and
-    // "revise" a problem the user never asked about).
+    // A full reset. Every piece of session state is listed here on purpose.
     function startOver(){
         setProblem('')
         setLockedProblem('')
         setStyle('')
-        setBlueprint(null)
-        setFeedback('')
-        setResult(null)
-        setSelected(null)
         setMessages([])
         setErrorMsg('')
-        setTestSelected(null)
-        setTryLog([])
+        setPicked('default')
+        setPasted(null)
+        setExpanded(null)
         setStage('idle')
     }
 
     // is the model actively working? drives the pulsing dots + rotating thinking text
-    const thinking = stage === 'planning' || stage === 'generating'
-                  || stage === 'verifying' || stage === 'repairing'
-    // which phrase set to cycle. A revise has its own set; a first draft that has a
-    // style to honour gets the 'styled' set, so the thoughts match what's happening.
+    const thinking = checking || stage === 'planning'
+    // Which phrase set to cycle, so the thoughts match what is actually happening.
     const phaseKey = stage === 'planning'
-        ? (blueprint ? 'revising' : style ? 'styled' : 'planning')
+        ? (style ? 'styled' : 'planning')
         : stage
     const phrases  = THINKING[phaseKey] ?? []
     const phrase   = phrases.length ? phrases[tick % phrases.length] : ''
 
-    // rotate the phrase every ~1.9s while thinking; reset when the phase changes
     useEffect(() => {
         if (!thinking) { setTick(0); return }
         const id = setInterval(() => setTick(t => t + 1), 1900)
         return () => clearInterval(id)
     }, [thinking, phaseKey])
 
-    // statusDot / topLine / repaired lived here to drive the old pipeline bar.
-    // The pane's own border is the status light now (paneAccent above), so the
-    // three of them had one consumer between them and it is gone. Pipeline.tsx is
-    // still on disk — unused by this component, kept for the rebuild.
-
-    // Resolve "null means the latest" ONCE, here. Both the header and <Results>
-    // read this same index, so the convention lives in exactly one line and the
-    // child never has to know that null was ever a possibility.
-    const shownIndex = selected ?? (result ? result.attempts.length - 1 : 0)
-    const shown = result?.attempts[shownIndex]
-
-    // The sandbox earns its half of the screen only once there is code to put in
-    // it. Everything before that — the problem, the style question, the blueprint
-    // — is conversation, and conversation reads better across the full width than
-    // squeezed into a rail beside an empty panel.
-    const codeStage = stage === 'generating' || stage === 'verifying'
-                   || stage === 'repairing'  || stage === 'done'
+    // The sandbox earns half the screen only once there is code to put in it.
+    const codeStage = code !== null
     const autoLayout: 'thread' | 'split' = codeStage ? 'split' : 'thread'
     const layout = layoutOverride ?? autoLayout
 
-    // Drop the override whenever the automatic answer changes. That is what makes
-    // "ask a new problem and the blueprint takes the whole page again" free: the
-    // stage returns to a thread stage and the override clears with it. WITHIN a
-    // stage the override survives, so a minimised sandbox stays minimised.
     useEffect(() => { setLayoutOverride(null) }, [autoLayout])
 
-    // Percentages, not pixels: the split has to survive a window resize, and a
-    // fixed 352px rail is half the screen on a laptop and a sliver on a 4K.
-    const cols = layout === 'thread'  ? '1fr 0px 0px'
-               : layout === 'sandbox' ? '0px 0px 1fr'
-               :                        `${leftPct}% 6px 1fr`
+    
+    const cols = layout === 'thread'  ? '100% 0px 0%'
+               : layout === 'sandbox' ? '0% 0px 100%'
+               :                        `${leftPct}% 6px calc(${100 - leftPct}% - 6px)`
 
-    // Cheap enough to run on every move: one subtraction and a comparison, and
-    // setState only fires when the boolean actually flips.
+    // One subtraction and a comparison; setState only fires when the boolean flips.
     function trackEdge(e: React.PointerEvent<HTMLDivElement>) {
         if (layout !== 'thread' || !shellRef.current) return
         const rect = shellRef.current.getBoundingClientRect()
         setEdgeHot(rect.right - e.clientX < 28)
     }
 
-    // The pane's edge colour IS the status readout. One variable, published as an
-    // inline custom property, so the CSS never branches on stage.
-    const paneAccent =
-          stage === 'repairing'                 ? 'var(--amber)'
-        : stage === 'done' && shown             ? (shown.result.all_passed ? 'var(--green)' : 'var(--red)')
-        : stage === 'idle'                      ? 'var(--line)'
-        :                                         'var(--violet)'
+    // The pane's edge colour IS the status readout, published as a custom property.
+    const paneAccent = stage === 'idle' ? 'var(--line)' : 'var(--violet)'
     // "working" breathes, "lit" holds. Anything mid-flight breathes.
-    const paneWorking = stage === 'planning' || stage === 'generating'
-                     || stage === 'verifying' || stage === 'repairing'
-    const paneLit = stage === 'done' || stage === 'blueprint'
+    const paneWorking = restyling || stage === 'planning'
+    const paneLit = stage === 'accepted' || stage === 'done'
 
-    // Which copy button just fired, so the label can confirm it. Null after 1.4s —
-    // a confirmation that never clears stops being a confirmation.
+    // Which copy button just fired, so the label can confirm it. Clears after 1.4s.
     const [copied, setCopied] = useState<'code' | 'tests' | null>(null)
     async function copy(what: 'code' | 'tests') {
-        const text = what === 'code' ? shown?.code : result?.tests
+        const text = what === 'code' ? code : diff
         if (!text) return
         await navigator.clipboard.writeText(text)
         setCopied(what)
@@ -629,8 +662,6 @@ export default function Litmus(){
 
     function startDrag(e: React.PointerEvent<HTMLDivElement>) {
         e.preventDefault()
-        // Pointer capture keeps the drag alive when the cursor outruns the 6px
-        // handle — without it the divider drops the moment you move quickly.
         e.currentTarget.setPointerCapture(e.pointerId)
         setDragging(true)
     }
@@ -638,7 +669,6 @@ export default function Litmus(){
         if (!dragging || !shellRef.current) return
         const rect = shellRef.current.getBoundingClientRect()
         const pct = ((e.clientX - rect.left) / rect.width) * 100
-        // Clamped so neither pane can be dragged into uselessness.
         setLeftPct(Math.min(72, Math.max(24, pct)))
     }
     function endDrag(e: React.PointerEvent<HTMLDivElement>) {
@@ -647,8 +677,6 @@ export default function Litmus(){
     }
 
     return(
-        //352px: The first column stays locked at a fixed width of 352 pixels (great for a sidebar).1fr: The fr means "fraction". 
-        // The second column grows to fill one share (all) of the leftover empty space on the screen
         <div
             ref={shellRef}
             onPointerMove={trackEdge}
@@ -656,32 +684,16 @@ export default function Litmus(){
             className="relative h-dvh flex flex-col overflow-hidden bg-[var(--bg)] text-[var(--text)] lg:grid lg:grid-rows-[minmax(0,1fr)]"
             style={{
                 gridTemplateColumns: cols,
-                // Animating the TRACK means the content reflows with the column
-                // instead of being slid over by a transform. Off during a drag —
-                // a transition there makes the divider lag behind the cursor.
                 transition: dragging ? 'none' : 'grid-template-columns .28s cubic-bezier(.4,0,.2,1)',
             }}
         >
-            {/* ============ LEFT: chat column ============ */}
-            {/* min-h-0: the vertical twin of min-w-0. Without it a grid item won't
-                shrink below its content, so the thread grows instead of scrolling. */}
-            {/* `relative` because the header and composer are lifted OUT of the
-                flow and float over the thread. That is what makes the glass real:
-                a header that sits above content in the flow has nothing behind it
-                to blur, and blurring the flat panel colour looks like nothing. */}
             <aside className="relative w-full h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
 
-                {/* header — fixed. No bottom border in full-page mode: a rule across
-                    an empty page draws a line for no reason, and the reference has
-                    the title floating on the same surface as the thread. */}
                 <header className={`absolute inset-x-0 top-0 z-30 flex items-center gap-2.5 px-4 py-3.5 transition-[background-color,backdrop-filter,border-color] duration-300 ${
                     threadScrolled
                         ? 'border-b border-[var(--line-soft)] bg-[color-mix(in_srgb,var(--panel)_72%,transparent)] backdrop-blur-xl backdrop-saturate-150'
                         : 'border-b border-transparent bg-transparent'
                 }`}>
-                    {/* alt="" on purpose: the wordmark right next to it already
-                        says "litmus", so naming the image too would make a screen
-                        reader announce the brand twice. */}
                     <span className="brand-mark">
                         <img src="/favicon.svg" alt="" />
                     </span>
@@ -689,10 +701,6 @@ export default function Litmus(){
                         <span className="text-[var(--violet)]">.</span>
                     </span>
 
-                    {/* Once a problem is locked it becomes the document title, the way
-                        the reference names the thing you are working on rather than
-                        the tool you are working in. Truncated — a pasted assignment
-                        is a paragraph, not a title. */}
                     {lockedProblem && (
                         <span className="hidden lg:flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--muted)]">
                             <span className="text-[var(--line)]">/</span>
@@ -702,7 +710,6 @@ export default function Litmus(){
                     )}
 
                     <div className="ml-auto flex items-center gap-1.5">
-                        {/* hidden at idle — there is nothing to start over from */}
                         {stage !== 'idle' && (
                             <button
                                 onClick={startOver}
@@ -712,10 +719,6 @@ export default function Litmus(){
                             </button>
                         )}
 
-                        {/* The pane control. Its ICON changes on edge-hover — arrows
-                            at rest, a split panel when you are near the edge that
-                            would open it — so the corner and the edge are visibly
-                            the same control reached two ways. */}
                         <Tip label={layout === 'thread' ? 'Split the pane' : 'Collapse to full page'}>
                         <button
                                 onClick={() => setLayoutOverride(layout === 'thread' ? 'split' : 'thread')}
@@ -735,12 +738,6 @@ export default function Litmus(){
                     </div>
                 </header>
 
-                {/* thread — the only part of this column that scrolls.
-                    Full page does NOT mean full width. A line of prose spanning a
-                    27" monitor is unreadable, so the column is capped and centred
-                    and the page around it stays empty on purpose. When the pane is
-                    split it is already narrow, so the cap does nothing and comes
-                    off. */}
                 <div
                     onScroll={(e) => setThreadScrolled(e.currentTarget.scrollTop > 8)}
                     className={`h-full overflow-y-auto px-4 pt-20 pb-44 flex flex-col gap-5 ${
@@ -748,65 +745,90 @@ export default function Litmus(){
                     }`}
                 >
 
-                    {/* the interleaved chat log — user right, litmus left, in order */}
-                    {messages.map((m, i) => {
-                        // Only the newest litmus bubble pulses. Older ones are settled
-                        // history — a ring on every past reply turns the thread into a
-                        // wall of blinking and stops meaning "here".
+{messages.map((m, i) => {
+                        // Only the newest litmus bubble pulses; older ones are settled history.
                         const isCurrent = i === messages.length - 1
-                        return (
-                        m.role === 'user' ? (
-                            <div key={i} className="self-end max-w-[85%] rounded-[12px_12px_3px_12px] border border-[var(--line)] bg-[var(--panel-3)] px-3.5 py-2.5 text-[14px]">
-                                {m.text}
+
+                        if (m.role === 'user') return (
+                            <div key={i} className="self-end flex max-w-[85%] flex-col items-end gap-2">
+                                {m.pasted && (
+                                    <PastedCard text={m.pasted} onOpen={() => setExpanded({ text: m.pasted! })} />
+                                )}
+                                {m.text && (
+                                    <div className="rounded-[12px_12px_3px_12px] border border-[var(--line)] bg-[var(--panel-3)] px-3.5 py-2.5 text-[14px]">
+                                        {m.text}
+                                    </div>
+                                )}
                             </div>
-                        ) : (
+                        )
+
+                        // One litmus message, one bubble. options and choices are
+                        // attachments under the text, not message kinds of their own.
+                        const [lead, rest] = m.text ? splitReply(m.text) : ['', null]
+
+                        return (
                             <div key={i} className="fade-in self-start max-w-[92%] flex flex-col gap-2">
                                 <div className="flex items-center gap-2">
                                     <span className={`${isCurrent ? 'pulse-ring ' : ''}grid place-items-center w-[17px] h-[17px] rounded-full bg-[var(--violet)] text-white font-mono text-[9px] font-bold`}>L</span>
                                     <span className="font-mono text-[11px] text-[var(--faint)]">litmus</span>
                                 </div>
-                                {/* whitespace-pre-line so the PEP 8 list keeps its line breaks */}
-                                <p className="m-0 text-[14px] text-[var(--muted)] leading-relaxed whitespace-pre-line">{m.text}</p>
 
-                                {/* a question: options stacked one above the other. They stay in
-                                    the thread after answering — the chosen one keeps its violet
-                                    edge, the rest go dim and unclickable, so scrolling back shows
-                                    what was asked AND what the alternatives were. */}
+                                {lead && (
+                                    <p className="m-0 text-[14px] text-[var(--muted)] leading-relaxed whitespace-pre-line">{lead}</p>
+                                )}
+
+                                {rest && (
+                                    <PastedCard
+                                        text={rest}
+                                        label="EXPLANATION"
+                                        prose
+                                        onOpen={() => setExpanded({ text: rest, label: 'EXPLANATION', prose: true })}
+                                    />
+                                )}
+
                                 {m.options && (
-                                    <div className="mt-1 flex flex-col gap-1.5">
-                                        {m.options.map(opt => {
-                                            const picked   = m.chosen === opt
-                                            const answered = m.chosen !== undefined
-                                            return (
-                                                <button
-                                                    key={opt}
-                                                    onClick={() => chooseStyle(opt)}
-                                                    disabled={answered}
-                                                    className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors ${
-                                                        picked
-                                                            ? 'border-[var(--violet)] bg-[var(--violet)]/10'
-                                                            : answered
-                                                                ? 'border-[var(--line-soft)] opacity-40'
-                                                                : 'border-[var(--line)] bg-[var(--panel-2)] hover:border-[var(--violet-dim)]'
-                                                    }`}
-                                                >
-                                                    <span className={`font-mono text-[12.5px] ${picked ? 'text-[var(--violet)]' : 'text-[var(--text)]'}`}>
-                                                        {picked ? '✓ ' : ''}{STYLE_OPTIONS[opt].label}
-                                                    </span>
-                                                    <span className="font-mono text-[11px] text-[var(--faint)]">
-                                                        {STYLE_OPTIONS[opt].hint}
-                                                    </span>
-                                                </button>
-                                            )
-                                        })}
+                                    <>
+                                        <div className="mt-1 flex flex-col gap-1.5">
+                                            {m.options.map((o, j) => (
+                                                <OptionRow
+                                                    key={o.id}
+                                                    id={o.id}
+                                                    label={o.label}
+                                                    hint={o.hint}
+                                                    off={o.off}
+                                                    active={picked === o.id}
+                                                    locked={!isCurrent}
+                                                    delay={j * 70}
+                                                    onPick={handlePick}
+                                                />
+                                            ))}
+                                        </div>
+                                        <p className="m-0 font-mono text-[11px] text-[var(--faint)]">
+                                            the pane on the right shows your choice — it updates as you change it
+                                        </p>
+                                    </>
+                                )}
+
+                                {m.choices && (
+                                    <div className="mt-1 flex gap-1.5">
+                                        {m.choices.map((b, j) => (
+                                            <OptionRow
+                                                key={b}
+                                                id={b}
+                                                label={b}
+                                                hint={BUTTON_CHOICES.find(c => c.id === b)?.hint}
+                                                locked={!isCurrent}
+                                                delay={280 + j * 70}
+                                                onPick={handleClick}
+                                            />
+                                        ))}
                                     </div>
                                 )}
                             </div>
                         )
-                        )
                     })}
 
-                    {/* model thinking: pulsing dots + a rotating phrase that fades as it cycles */}
+                
                     {thinking && (
                         <div className="self-start flex flex-col gap-2">
                             <div className="dots" aria-label="thinking"><i /><i /><i /></div>
@@ -816,67 +838,55 @@ export default function Litmus(){
                         </div>
                     )}
 
-                    {/* errors never get swallowed into the console alone */}
                     {errorMsg && (
                         <div className="rounded-lg border border-[var(--red)]/40 bg-[var(--red)]/10 px-3 py-2 font-mono text-[12px] text-[var(--red)]">
                             {errorMsg}
                         </div>
                     )}
 
-                    {/* The blueprint renders IN the thread, not in the side pane.
-                        It is the thing being discussed, and at this stage there is
-                        no code yet — so it gets the whole page, in line with the
-                        conversation that produced it. */}
-                    {stage === 'blueprint' && blueprint && (
-                        <BlueprintPanel
-                            blueprint={blueprint}
-                            style={style}
-                            feedback={feedback}
-                            setFeedback={setFeedback}
-                            onRevise={revise}
-                            onLockIn={lockIn}
-                            busy={busy}
-                        />
-                    )}
-
-                    {/* scroll anchor — the effect keeps this in view on every new message */}
                     <div ref={bottomRef} />
                 </div>
 
-                {/* composer — fixed to the bottom. Dims + freezes once we lock in.
-                    It tracks the thread's width so the two read as one column. */}
                 <div className={`absolute inset-x-0 bottom-0 z-30 px-3.5 pb-5 pt-10 pointer-events-none ${
                     layout === 'thread' ? 'mx-auto w-full max-w-[820px]' : ''
                 }`}>
-                    {/* the fade lives behind the box, not on it */}
                     <div className="thread-fade pointer-events-none absolute inset-x-0 top-0 h-full" />
                     <div className="relative pointer-events-auto">
                     <div className={`rounded-[10px] border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2.5 flex flex-col gap-2 focus-within:border-[var(--violet-dim)] transition-opacity ${locked ? 'opacity-40 pointer-events-none' : ''}`}>
+                        {pasted && (
+                            <div className="pb-1">
+                                <PastedCard
+                                    text={pasted}
+                                    onOpen={() => setExpanded({ text: pasted })}
+                                    onRemove={() => setPasted(null)}
+                                />
+                            </div>
+                        )}
                         <textarea
                             rows={2}
                             value={problem}
+                            onPaste={onPaste}
                             onChange={(e) => setProblem(e.target.value)}
-                            // Enter submits, Shift+Enter makes a newline. preventDefault
-                            // stops Enter from also inserting a line break.
                             onKeyDown={(e) => {
-                                if (e.key === 'Escape' && testSelected) { e.preventDefault(); exitTryMode(); return }
-                                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); composingStyle ? submitStyle() : testSelected ? runTestCase() : submitProblem() }
+                                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitProblem() }
                             }}
                             disabled={locked}
-                            placeholder={composingStyle ? 'Describe your style…' : testSelected ? "edit the input": 'What should Litmus build?'}
+                            placeholder={describing
+                                ? 'camelCase methods, comments instead of docstrings, no type hints…'
+                                : 'What should Litmus build?'}
                             spellCheck={false}
                             className="w-full min-h-[44px] resize-none bg-transparent text-[14px] text-[var(--text)] placeholder:text-[var(--faint)] focus:outline-none"
                         />
                         <div className="flex items-center justify-between gap-2.5">
                             <span className="font-mono text-[10.5px] text-[var(--faint)]">
-                                {testSelected ? '⏎ to run · esc to exit' : '⏎ to send'}
+                                {describing ? '⏎ to restyle · describe the rules, or paste code' : '⏎ to send'}
                             </span>
                             <button
-                                onClick={composingStyle ? submitStyle : testSelected ? runTestCase : submitProblem}
-                                disabled={busy || trying || !problem.trim()}
+                                onClick={submitProblem}
+                                disabled={busy || restyling || (!problem.trim() && !pasted)}
                                 className="rounded-md bg-[var(--violet)] px-3.5 py-1.5 text-[13px] font-semibold text-white hover:bg-[var(--violet-dim)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             >
-                                {busy ? 'Generating…' : trying ? 'Running…' : composingStyle ? 'Set style' : testSelected ? 'Run' : 'Generate'}
+                                {busy ? 'Generating…' : restyling ? 'Restyling…' : describing ? 'Restyle' : 'Send'}
                     </button>
                         </div>
                     </div>
@@ -885,11 +895,6 @@ export default function Litmus(){
 
             </aside>
 
-            {/* ============ THE LIVE EDGE ============ */}
-            {/* In full-page mode there is no divider to grab, so the edge itself is
-                the handle: approach it and it lights, click it and the pane splits.
-                A 28px hit zone lit by a 3px line — the target has to be forgiving,
-                the mark does not. */}
             {layout === 'thread' && (
                 <button
                     onClick={() => setLayoutOverride('split')}
@@ -902,10 +907,6 @@ export default function Litmus(){
                 </button>
             )}
 
-            {/* ============ DIVIDER ============ */}
-            {/* Its own grid track rather than a border on either pane: a border
-                cannot be grabbed, and a positioned overlay would have to be kept
-                in sync with a column width it doesn't own. */}
             <div
                 onPointerDown={startDrag}
                 onPointerMove={onDrag}
@@ -918,29 +919,14 @@ export default function Litmus(){
                     layout === 'split' ? 'cursor-col-resize' : 'pointer-events-none'
                 }`}
             >
-                {/* The visible line is 6px but the grab area is 16px — a 6px hit
-                    target is a fight with the mouse.
-
-                    Transparent at rest. The panes are already separated by the gap
-                    around the sandbox's rounded card, so a permanent rule would be
-                    a second divider drawn on top of the one the layout already
-                    implies. It appears when you reach for it and not before. */}
                 <span className="absolute inset-y-0 -left-[5px] -right-[5px]" />
                 <span className={`block h-full w-full rounded-full transition-colors duration-200 ${
                     dragging ? 'bg-[var(--violet)]' : 'bg-transparent group-hover:bg-[var(--violet)]/60'
                 }`} />
             </div>
 
-            {/* ============ RIGHT: workspace ============ */}
-            {/* Padding, not margin, and box-border everywhere — so when the grid
-                track collapses to 0px the padding clips with it instead of holding
-                the pane open at 16px. */}
             <main className="hidden lg:flex flex-col min-w-0 min-h-0 overflow-hidden p-2 pl-0">
 
-                {/* The sandbox is a CARD, not a column: inset from the window and
-                    rounded, so the gap around it separates the panes and no rule
-                    has to be drawn between them. Its border is the status light —
-                    see .pane in index.css. */}
                 <div
                     style={{ ['--pane-accent' as string]: paneAccent }}
                     className={`pane flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl bg-[var(--panel)] ${
@@ -948,9 +934,6 @@ export default function Litmus(){
                     }`}
                 >
 
-                {/* top bar: environment left, stage in the CENTRE, actions right.
-                    Absolute centring rather than justify-between, so the stage pill
-                    stays put as the actions on the right change width. */}
                 <header className="relative shrink-0 flex items-center px-4 py-2.5 border-b border-[var(--line-soft)]">
 
                     <span className="hidden xl:flex items-center gap-1.5 font-mono text-[11px] text-[var(--faint)]">
@@ -959,10 +942,6 @@ export default function Litmus(){
                         <span>no network</span>
                     </span>
 
-                    {/* the pipeline, compressed to one pill. The long horizontal
-                        stepper could not survive the checks that now sit between
-                        stages; a single pill that names WHERE you are and takes the
-                        stage's colour says the same thing in a tenth of the space. */}
                     <span
                         className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full border px-3 py-1"
                         style={{
@@ -975,35 +954,21 @@ export default function Litmus(){
                             style={{ background: paneAccent }}
                         />
                         <span className="font-mono text-[11.5px] font-medium" style={{ color: paneAccent }}>
-                            {stage === 'idle'       ? 'idle'
+                            {restyling              ? 'restyling'
+                           : stage === 'idle'       ? 'idle'
                            : stage === 'styling'    ? 'style'
-                           : stage === 'awaiting_style' ? 'style'
-                           : stage === 'planning'   ? (blueprint ? 'revising' : 'blueprint')
-                           : stage === 'blueprint'  ? 'blueprint'
-                           : stage === 'generating' ? 'generating'
-                           : stage === 'verifying'  ? 'verifying'
-                           : stage === 'repairing'  ? 'repairing'
+                           : stage === 'accepted'   ? 'style set'
+                           : stage === 'planning'   ? 'blueprint'
+                           : stage === 'approved'   ? 'approved'
                            :                          'done'}
                         </span>
-                        {shown && stage === 'done' && (
-                            <span className="font-mono text-[11.5px] text-[var(--muted)]">
-                                {shown.result.passed}/{shown.result.total}
-                            </span>
-                        )}
                     </span>
 
-                    {/* actions. Disabled rather than hidden until there is something
-                        to copy — a control that appears and disappears makes the bar
-                        jump every time a run finishes. */}
                     <span className="ml-auto flex items-center gap-1">
-                        {/* Icons, not labels. Two text buttons put ~24 characters of
-                            chrome above a code panel that has to fit a signature; the
-                            title attribute carries the name for anyone who needs it,
-                            and a tick replaces the glyph for a moment on success. */}
                         <Tip label="Copy solution">
                             <button
                                 onClick={() => copy('code')}
-                                disabled={!shown}
+                                disabled={!code}
                                 aria-label="Copy solution"
                                 className={`grid place-items-center rounded-md p-1.5 transition-colors hover:bg-[var(--panel-3)] disabled:opacity-30 disabled:hover:bg-transparent ${
                                     copied === 'code' ? 'text-[var(--green)]' : 'text-[var(--faint)] hover:text-[var(--text)]'
@@ -1016,11 +981,11 @@ export default function Litmus(){
                                 )}
                             </button>
                         </Tip>
-                        <Tip label="Copy tests">
+                        <Tip label="Copy diff">
                             <button
                                 onClick={() => copy('tests')}
-                                disabled={!result?.tests}
-                                aria-label="Copy tests"
+                                disabled={!diff}
+                                aria-label="Copy diff"
                                 className={`grid place-items-center rounded-md p-1.5 transition-colors hover:bg-[var(--panel-3)] disabled:opacity-30 disabled:hover:bg-transparent ${
                                     copied === 'tests' ? 'text-[var(--green)]' : 'text-[var(--faint)] hover:text-[var(--text)]'
                                 }`}
@@ -1060,18 +1025,11 @@ export default function Litmus(){
                     </span>
                 </header>
 
-                {/* Stage area. When the IDE is up it does NOT scroll and carries no
-                    padding: the pane above is already the card, and a scrolling
-                    parent is exactly what let the results panel grow with its
-                    content instead of filling a fixed height. Every other stage is
-                    a short centred block, so it scrolls and pads as before. */}
                 <div className={`flex flex-1 min-h-0 flex-col ${
-                    stage === 'done' && result ? 'overflow-hidden' : 'overflow-y-auto p-5'
+                    code !== null ? 'overflow-hidden' : 'overflow-y-auto p-5'
                 }`}>
 
-                    {/* idle + planning + generating share the centered scanbox layout,
-                        only the caption changes — so one block, dynamic text */}
-                    {stage !== 'blueprint' && !result && (
+                    {code === null && (
                     <div className="h-full min-h-[300px] flex flex-col items-center justify-center gap-5 text-center">
                         <div className="scanbox w-[190px] h-[112px] rounded-[10px] border border-[var(--line)] bg-[var(--panel)]">
                             <div className="absolute inset-4 flex flex-col gap-2.5">
@@ -1079,58 +1037,93 @@ export default function Litmus(){
                                 <i className="h-1.5 w-[76%] rounded-sm bg-[var(--line-soft)]" />
                                 <i className="h-1.5 w-[54%] rounded-sm bg-[var(--line-soft)]" />
                                 <i className="h-1.5 w-[84%] rounded-sm bg-[var(--line-soft)]" />
-                </div>
-                        </div>
-                        {/* Fixed width so the tips don't reflow the block as they rotate:
-                            they vary from ~30 to ~57 characters, and letting the box size
-                            to its content would resize the whole centred group every few
-                            seconds. min-h on the <p> does the same job vertically, holding
-                            the row open for the couple of tips that wrap to two lines. */}
-                        <div className="flex w-[420px] max-w-full flex-col items-center gap-2.5">
-                                <h3 className="text-[15px] font-semibold text-[var(--text)]">
-                                    {stage === 'planning'   ? 'Awaiting blueprint lock'
-                                   : stage === 'generating' ? 'Writing solution and tests'
-                                   :                          'Sandbox idle'}
-                                </h3>
-                                {/* key= is what replays the fade: a new key unmounts the
-                                    old <p> and mounts a fresh one, restarting the CSS
-                                    animation. Reuse the element and the animation has
-                                    already run, so the text would swap with no transition.
-
-                                    No ornament here on purpose. The scanbox above is
-                                    already the moving, coloured thing; the tip's job is to
-                                    be readable underneath it. The weight and the near-white
-                                    --tip are what lift it off the panel — decoration on top
-                                    of that only competed for attention. */}
-                                <p key={TIPS[tipIndex]}
-                                   className="fade-in m-0 min-h-[17px] text-center font-mono text-[12px] font-medium text-[var(--tip)]">
-                                    {TIPS[tipIndex]}
-                                </p>
                             </div>
                         </div>
+                        <div className="flex w-[420px] max-w-full flex-col items-center gap-2.5">
+                            <h3 className="text-[15px] font-semibold text-[var(--text)]">
+                                {stage === 'planning' ? 'Awaiting blueprint lock' : 'Sandbox idle'}
+                            </h3>
+                            <p key={TIPS[tipIndex]}
+                               className="fade-in m-0 min-h-[17px] text-center font-mono text-[12px] font-medium text-[var(--tip)]">
+                                {TIPS[tipIndex]}
+                            </p>
+                        </div>
+                    </div>
                     )}
 
-                    { stage === "done" && result &&(
-                        /* h-full, and no border of its own: the pane wrapping this
-                           column already draws the card, and a second rounded border
-                           4px inside the first reads as a rendering bug. */
-                        <div className="flex h-full min-w-0 min-h-0 flex-col overflow-hidden">
-                            <Results
-                                attempts={result.attempts}
-                                testSource={result.tests}
-                                testSpec={result.test_spec}
-                                selected={shownIndex}
-                                onSelect={setSelected}
-                                setTestCase={sendTestinput}
-                                tryLog={tryLog}
-                                trying={trying}
-                            />
+                    {code !== null && (
+                        <div className="fade-in flex h-full min-w-0 min-h-0 flex-col overflow-hidden">
+                            <div className="flex items-center border-b border-[var(--line-soft)] bg-[var(--panel-2)]">
+                                <span className="border-b-[1.5px] border-[var(--violet)] bg-[var(--panel)] px-3.5 py-2 font-mono text-[11.5px] text-[var(--text)]">
+                                    sample.py
+                                </span>
+                                <span className="ml-auto pr-3.5 font-mono text-[10.5px] text-[var(--faint)]">
+                                    {restyling ? 'restyling…' : diff ? 'your style' : 'default'}
+                                </span>
+                            </div>
+
+                            <div className="relative min-h-0 flex-1 overflow-auto bg-[var(--panel)]">
+                                <pre className="m-0 p-4 font-mono text-[12.5px] leading-[1.62] text-[var(--text)]">
+                                    <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+                                </pre>
+                                {restyling && (
+                                    <div className="absolute inset-0 grid place-items-center bg-[var(--panel)]/78 backdrop-blur-[1px]">
+                                        <span className="dots flex gap-1.5"><i /><i /><i /></span>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="border-t border-[var(--line)] bg-[#0c0c0f]">
+                                <div className="flex items-center gap-2 border-b border-[var(--line-soft)] px-3.5 py-1.5">
+                                    <b className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.05em] text-[var(--faint)]">terminal</b>
+                                    <span className="ml-auto font-mono text-[10.5px] text-[var(--faint)]">
+                                        {diff ? `${diff.split('\n').length - 1} lines` : 'idle'}
+                                    </span>
+                                </div>
+                                <div className="h-[186px] overflow-auto">
+                                    {diff ? (
+                                        <pre className="m-0 p-4 font-mono text-[12px] leading-[1.6]">
+                                            {diff.split('\n').map((line, i) => (
+                                                <div key={i} className={
+                                                    line.startsWith('+++') || line.startsWith('---') ? 'text-[var(--faint)]'
+                                                  : line.startsWith('@@')  ? 'text-[var(--violet)]'
+                                                  : line.startsWith('+')   ? 'text-[var(--green)]'
+                                                  : line.startsWith('-')   ? 'text-[var(--red)]'
+                                                  :                          'text-[var(--muted)]'
+                                                }>{line || '\u00a0'}</div>
+                                            ))}
+                                        </pre>
+                                    ) : (
+                                        <p className="m-0 p-4 font-mono text-[11.5px] text-[var(--faint)]">
+                                            nothing to show yet — the diff appears after a restyle
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     )}
 
             </div>
                 </div>
             </main>
+
+            {expanded !== null && (
+                <PastedOverlay
+                    text={expanded.text}
+                    label={expanded.label}
+                    prose={expanded.prose}
+                    onClose={() => setExpanded(null)}
+                />
+            )}
+            {styleView !== null && (
+                <StyleOverlay
+                    view={styleView}
+                    onOpen={openStyle}
+                    onBack={() => setStyleView(v => v?.view === 'detail' ? { view: 'list', styles: v.styles } : v)}
+                    onClose={() => setStyleView(null)}
+                    onAccept={acceptStyle}
+                />
+            )}
         </div>
     )
 }

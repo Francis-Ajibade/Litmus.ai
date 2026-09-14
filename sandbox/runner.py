@@ -18,17 +18,9 @@ import docker
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import ReadTimeout
 
-# The pre-built image from sandbox/Dockerfile. Built once; never pip-installs at
-# run time (it can't — the container has no network).
 DEFAULT_IMAGE = "coderace-sandbox:latest"
 
-# Where pytest writes its JSON report INSIDE the container. It lives on the
-# tmpfs scratch mount (in-memory, disposable) because the root filesystem is
-# read-only. tmpfs is destroyed the instant the container stops, so we can't
-# fish the file out afterward — instead the container `cat`s it to stdout as its
-# last act, and Docker's logs preserve that output until we remove the box.
 REPORT_PATH = "/tmp/report.json"
-
 
 @dataclass
 class SandboxResult:
@@ -58,7 +50,6 @@ class SandboxResult:
             and self.errors == 0
         )
 
-
 def run_in_sandbox(
     solution_code: str,
     test_code: str,
@@ -77,10 +68,6 @@ def run_in_sandbox(
     """
     client = client or docker.from_env()
 
-    # A private host dir holding exactly two files. We make it world-readable
-    # (dir 0755 / files 0644) on purpose: the container runs as `nobody`
-    # (uid 65534), a different uid than the host user, and must be able to read
-    # a mount owned by someone else. The code isn't secret, so this is safe.
     with tempfile.TemporaryDirectory(prefix="coderace-") as workdir:
         _write_file(os.path.join(workdir, "solution.py"), solution_code)
         _write_file(os.path.join(workdir, "test_solution.py"), test_code)
@@ -88,11 +75,6 @@ def run_in_sandbox(
 
         container = client.containers.create(
             image,
-            # Run pytest with its human output sent to STDERR (1>&2), then dump
-            # the JSON report to STDOUT. Result: container stdout is pure JSON,
-            # container stderr is the human log. If pytest is killed before
-            # writing the report, `cat` finds nothing -> empty stdout -> we
-            # report "did not complete" instead of guessing.
             command=[
                 "sh", "-c",
                 "python -m pytest /app -q -p no:cacheprovider "
@@ -101,7 +83,6 @@ def run_in_sandbox(
             ],
             working_dir="/app",
 
-            # ---- The mandatory security posture. Each flag blocks one attack. ----
             network_mode="none",                        # no exfiltration, no callbacks, no payload download
             mem_limit=mem_limit,                        # a memory bomb can't take the host down...
             memswap_limit=mem_limit,                    # ...and can't cheat via swap (swap == mem => none)
@@ -121,33 +102,24 @@ def run_in_sandbox(
         try:
             container.start()
             try:
-                # The wall-clock kill switch is enforced from OUTSIDE the
-                # container — we never trust untrusted code to time itself out.
-                # If wait() exceeds the deadline, we kill the box ourselves.
                 result = container.wait(timeout=timeout_seconds)
                 exit_code = result.get("StatusCode")
             except (ReadTimeout, ReqConnectionError):
                 timed_out = True
                 container.kill()
 
-            # container stdout = the JSON report (or empty); container stderr =
-            # pytest's own human log. The code-under-test's own prints are NOT
-            # here — pytest captures those and tucks them inside the report.
             report_json = container.logs(stdout=True, stderr=False).decode("utf-8", "replace")
             log = container.logs(stdout=False, stderr=True).decode("utf-8", "replace")
             report = _parse_report(report_json)
         finally:
-            # Incinerate the container no matter what happened above.
             container.remove(force=True)
 
     return _build_result(report, timed_out, exit_code, log)
-
 
 def _write_file(path: str, content: str) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     os.chmod(path, 0o644)  # world-readable so the `nobody` user can read it
-
 
 def _parse_report(stdout: str) -> dict[str, Any] | None:
     """Parse the JSON report the container `cat`ed to stdout. Returns None when
@@ -161,7 +133,6 @@ def _parse_report(stdout: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
 
-
 def _build_result(
     report: dict[str, Any] | None,
     timed_out: bool,
@@ -169,8 +140,6 @@ def _build_result(
     log: str,
 ) -> SandboxResult:
     if report is None:
-        # No structured report => the run did not complete cleanly (timeout /
-        # OOM-kill / crash before writing). Report that honestly.
         return SandboxResult(
             ok=False, timed_out=timed_out, exit_code=exit_code,
             passed=0, failed=0, errors=0, total=0, duration_ms=0.0,
@@ -180,7 +149,6 @@ def _build_result(
     summary = report.get("summary", {})
     tests = [_build_test(t) for t in report.get("tests", [])]
 
-    # The "Console": everything the code under test printed, in test order.
     captured_stdout = "".join(t["stdout"] for t in tests)
     captured_stderr = "".join(t["stderr"] for t in tests)
 
@@ -198,7 +166,6 @@ def _build_result(
         captured_stderr=captured_stderr,
         log=log,
     )
-
 
 def _build_test(t: dict[str, Any]) -> dict[str, Any]:
     """Flatten one pytest-json-report test object. Captured output lives on each

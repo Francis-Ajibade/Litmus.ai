@@ -79,6 +79,10 @@ html{ scroll-behavior:smooth }
   --text:#e9e9ef; --muted:#8a8a99; --faint:#5a5a68;
   --violet:#8b5cf6; --violet-dim:#6d4dc4; --indigo:#4338ca; --magenta:#c026d3;
   --green:#3fb950; --red:#f85149; --amber:#d9a441;
+  /* Selection, deliberately NOT violet: violet means "Litmus is working" across
+     the whole app, and a setting the user chose is a different kind of statement.
+     Teal also stays clear of green/red, which are already the test results. */
+  --pick:#4fd1c5; --pick-dim:#2f8d85;
   --glass:rgba(20,20,26,.55); --glass-strong:rgba(14,14,18,.72); --glass-line:rgba(255,255,255,.09);
   /* Secondary copy that still has to read as DESIGNED, not as leftover chrome.
      --faint (#5a5a68) is a muddy blue-grey: it dims by desaturating, which is
@@ -311,6 +315,10 @@ html{ scroll-behavior:smooth }
 @keyframes fadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
 .fade-in { animation: fadeIn .45s ease both; }
 
+/* ---------- saved-style rows slide in from the left ---------- */
+@keyframes slideInLeft { from { opacity:0; transform: translateX(-14px); } to { opacity:1; transform:none; } }
+.slide-in-left { animation: slideInLeft .36s ease both; }
+
 /* ---------- the "model is thinking" ellipsis ---------- */
 .dots { display:inline-flex; gap:5px; align-items:center; }
 .dots i { width:5px; height:5px; border-radius:50%; background:var(--faint); animation: dotPulse 1.2s ease-in-out infinite; }
@@ -408,7 +416,7 @@ html{ scroll-behavior:smooth }
 :root{
   --code-key:#a78bfa;   /* def / while / if / return */
   --code-fn:#7aa2f7;    /* function + class names */
-  --code-str:#8fd67a;
+  --code-str:#e0a458;   /* strings — gold, a shade off --amber so code and chrome stay distinct */
   --code-num:#4fd1c5;
 }
 .hljs-keyword, .hljs-literal, .hljs-built_in, .hljs-type { color:var(--code-key); }
@@ -485,3 +493,42 @@ html{ scroll-behavior:smooth }
 .thread-fade{
   background:linear-gradient(180deg, transparent 0%, var(--panel) 62%);
 }
+
+/* ---------- the scroll cue ----------
+   A small vertical bounce, slow and short. 6px of travel over 2s reads as an
+   invitation; anything faster or further reads as an alert, and the page is not
+   trying to alarm anyone.
+
+   The animation is on the element, not on a child, so the fade-out (a Tailwind
+   opacity transition) and the bounce compose instead of fighting. */
+.scroll-cue{ animation: scrollBounce 2s ease-in-out infinite; }
+@keyframes scrollBounce{
+  0%, 100% { transform: translateY(0) }
+  50%      { transform: translateY(6px) }
+}
+@media (prefers-reduced-motion:reduce){
+  /* the ARROW stays — only the motion goes. Perpetual movement is what the
+     preference exists to stop; the affordance itself is still useful. */
+  .scroll-cue{ animation:none }
+}
+
+/* ---------- the native scrollbar, in the app's palette ----------
+   Styled, never hidden. People reach for the scrollbar, and removing it takes
+   away a control the OS gave them — the section rail is an ADDITION to it, not
+   a replacement: the bar says how far through you are, the rail says what the
+   page is made of. */
+::-webkit-scrollbar{ width:10px; height:10px }
+::-webkit-scrollbar-track{ background:var(--bg) }
+::-webkit-scrollbar-thumb{
+  background:var(--line);
+  border-radius:999px;
+  /* a transparent border with background-clip is the trick that insets the
+     thumb — without it the bar touches both edges of the track and reads as a
+     block rather than a handle */
+  border:3px solid var(--bg);
+  background-clip:padding-box;
+}
+::-webkit-scrollbar-thumb:hover{ background:var(--violet-dim) }
+::-webkit-scrollbar-corner{ background:var(--bg) }
+/* Firefox has no pseudo-elements for this — two properties, same intent */
+html{ scrollbar-width:thin; scrollbar-color:var(--line) var(--bg); }

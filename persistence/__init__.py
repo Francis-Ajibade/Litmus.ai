@@ -1,23 +1,29 @@
 """CodeRace persistence layer (Postgres). Framework-agnostic repository."""
 
 from persistence.db import (
-    add_message,
     connect,
-    create_session,
     init_db,
+    create_session,
+    create_style,
+    update_style,
+    create_run,
     list_sessions,
-    load_session,
-    record_run,
+    list_styles,
+    get_style,
+    save_session_state,
+    load_session_state,
 )
-from persistence.waitlist import add_to_waitlist
 
 __all__ = [
-    "add_message",
-    "add_to_waitlist",
     "connect",
-    "create_session",
     "init_db",
+    "create_session",
+    "create_style",
+    "update_style",
+    "create_run",
     "list_sessions",
-    "load_session",
-    "record_run",
+    "list_styles",
+    "get_style",
+    "save_session_state",
+    "load_session_state",
 ]

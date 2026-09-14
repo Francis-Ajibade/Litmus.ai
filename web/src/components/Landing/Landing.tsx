@@ -1,20 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router"
 
-// ── shared bits ────────────────────────────────────────────────────────────
-
 // Fades a section up as it scrolls into view. Two deliberate choices:
-//
-//   1. It fires ONCE and then disconnects. Re-animating every time you scroll
-//      back up is the version everyone finds irritating, and it makes the page
-//      feel like it's fighting you.
-//   2. rootMargin's negative bottom means it triggers when the section is ~12%
-//      into the viewport rather than the instant its first pixel appears —
-//      otherwise the fade finishes before you've actually looked at it.
-//
-// Under prefers-reduced-motion the transition is dropped, so the state flip
-// still happens and the content just appears. Never leave content depending on
-// an animation to become visible.
 function Reveal({ children }: { children: React.ReactNode }) {
     const ref = useRef<HTMLDivElement>(null)
     const [shown, setShown] = useState(false)
@@ -38,8 +25,6 @@ function Reveal({ children }: { children: React.ReactNode }) {
     return (
         <div
             ref={ref}
-            // Published so descendants can key their own animations off the same
-            // observer — see .term-line in index.css. One observer, not five.
             data-shown={shown}
             className={`transition-all duration-700 ease-out motion-reduce:transition-none ${
                 shown ? "opacity-100 translate-y-0" : "opacity-0 translate-y-5"
@@ -49,8 +34,7 @@ function Reveal({ children }: { children: React.ReactNode }) {
         </div>
     )
 }
-// The mark is used four times; a local component keeps the 2KB path out of the
-// markup so the page structure stays readable.
+// The mark is used four times; a local component keeps the 2KB path in one place.
 function Mark({ size = 22, fill = "#ffffff", className = "" }: { size?: number; fill?: string; className?: string }) {
     return (
         <svg viewBox="165.6 157.7 693.1 693.1" width={size} height={size} className={className} role="img" aria-label="Litmus">
@@ -83,8 +67,7 @@ function SectionHead({ eyebrow, eyebrowColor, title, children }:
     )
 }
 
-// A user bubble. The 12/12/3/12 radius is the app's own — the clipped corner
-// points at the sender.
+// A user bubble, using the app's own 12/12/3/12 radius.
 function UserTurn({ delay, green = false, children }: { delay: string; green?: boolean; children: React.ReactNode }) {
     return (
         <div
@@ -98,10 +81,33 @@ function UserTurn({ delay, green = false, children }: { delay: string; green?: b
     )
 }
 
+function ScrollCue() {
+    const [gone, setGone] = useState(false)
+
+    useEffect(() => {
+        const onScroll = () => setGone(window.scrollY > 80)
+        onScroll()
+        window.addEventListener('scroll', onScroll, { passive: true })
+        return () => window.removeEventListener('scroll', onScroll)
+    }, [])
+
+    return (
+        <a
+            href="#how-it-works"
+            aria-label="Scroll to how it works"
+            className={`scroll-cue mt-12 grid h-9 w-9 place-items-center rounded-full border border-white/15 text-white/55 transition-opacity duration-500 hover:border-white/35 hover:text-white ${
+                gone ? 'pointer-events-none opacity-0' : 'opacity-100'
+            }`}
+        >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>
+            </svg>
+        </a>
+    )
+}
+
 export default function Landing(){
-    // The bar is invisible at rest and becomes glass once the page moves. Frosting
-    // a bar that sits on the hero it already matches just adds a seam; the glass
-    // has a job only when content is passing underneath it.
+    // The bar is invisible at rest and becomes glass once the page moves.
     const [scrolled, setScrolled] = useState(false)
     useEffect(() => {
         const onScroll = () => setScrolled(window.scrollY > 8)
@@ -111,17 +117,8 @@ export default function Landing(){
     }, [])
 
     return (
-        // Page root: layout + background ONLY. Font size/weight lived here before,
-        // and because font properties INHERIT, every child had to override its way
-        // back down. They now sit on the elements that own them.
         <div className="w-full overflow-x-clip bg-(--bg) font-sans">
 
-            {/* ═══════════ 1 · HERO — the student's fear ═══════════ */}
-            {/* `mesh` paints the violet gradient + grain as ::before/::after, so
-                everything inside needs `relative z-2` to sit above them. */}
-            {/* The nav lives OUTSIDE the hero block. Sticky positions against the
-                nearest scrolling ancestor, so a nav inside .mesh would unstick the
-                moment the hero scrolled past. */}
             <div className={`sticky top-0 z-50 flex items-center gap-2.5 py-3 px-5 md:px-14 transition-[background-color,backdrop-filter,border-color] duration-300 ${
                 scrolled
                     ? "border-b border-white/10 bg-[rgba(10,10,14,.55)] backdrop-blur-2xl backdrop-saturate-150"
@@ -132,28 +129,22 @@ export default function Landing(){
                         litmus<span className="text-[#c4b5fd]">.</span>
                     </span>
                     <div className="flex items-center ml-auto gap-4 md:gap-6">
-                        {/* A plain anchor, NOT a router Link. This jumps within the
-                            page we're already on — the browser has done that natively
-                            forever, and the router has no part in it. Routers (and
-                            react-router-hash-link) are for anchors you reach while
-                            CHANGING route, which isn't this. */}
                         <a
                             href="#how-it-works"
                             className="text-[13.5px] text-white/60 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/70 rounded-xs"
                         >
                             How it works
                         </a>
-                        {/* Stays inert until auth exists (Sept). cursor-default so it
-                            doesn't pretend to be clickable in the meantime — it becomes
-                            <Link to="/signin"> the day that route lands. */}
-                        <span className="text-[13.5px] text-white/60 cursor-default">Sign in</span>
+                        <Link
+                            to="/signin"
+                            className="text-[13.5px] text-white/60 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/70 rounded-xs"
+                        >
+                            Sign in
+                        </Link>
                     </div>
             </div>
 
-            {/* -mt puts the hero back UNDER the nav: the nav is a sibling now, so
-                without this the mesh would start below it and the bar would sit on
-                a black strip instead of on the gradient. */}
-            <div className="mesh relative -mt-[58px] pt-[58px] pb-20 md:pb-32">
+            <div id="hero" className="mesh relative -mt-[58px] pt-[58px] pb-20 md:pb-32">
 
                 <div className="relative z-2 flex flex-col items-center text-center px-5 md:px-14 pt-16 md:pt-24 lg:pt-29.5">
 
@@ -162,14 +153,7 @@ export default function Landing(){
                         <span className="text-[12.5px] md:text-[13.5px] text-white/85 text-left">built by a student who got tired of not knowing</span>
                     </div>
 
-                    {/* Unprefixed = phone, so 28px is the naked value and each
-                        breakpoint steps UP. Two properties carry big type: leading
-                        near 1.0 (default leading is built for paragraphs and leaves
-                        a canyon at 74px) and negative tracking. */}
                     <h1 className="display text-[30px] sm:text-[38px] md:text-[52px] lg:text-[78px] tracking-[-0.038em] text-white/45 max-w-250 text-balance">
-                        {/* w-fit + mx-auto so each line's box hugs its own text and
-                            stays centred — clip-path then reveals across the TEXT,
-                            not across the full column width. */}
                         <span className="relative block w-fit mx-auto">
                             <span className="type-line block">AI writes your code.</span>
                             <span className="type-caret" aria-hidden="true" />
@@ -185,11 +169,7 @@ export default function Landing(){
                         Litmus is the AI that makes you write it &mdash; and runs it to prove you got there.
                     </p>
 
-                    {/* Full-bleed on a phone — a thumb-width button beats a dainty
-                        centred one — auto-width from sm up. */}
                     <div className="flex flex-col items-center gap-4 mt-10 md:mt-10.5 w-full">
-                        {/* A Link, not a button — it goes somewhere, so it has to
-                            survive ⌘-click, middle-click and "copy link address". */}
                         <Link to="/sandbox" className="flex items-center justify-center gap-2.5 w-full sm:w-auto h-13.5 px-8 rounded-[13px] bg-(--violet) text-white text-[15.5px] md:text-[17px] font-semibold tracking-[-0.01em] shadow-[0_6px_28px_rgba(139,92,246,.55)] transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
                             <span>Try it on your assignment</span>
                             <span className="text-[17px]">&#8594;</span>
@@ -197,23 +177,17 @@ export default function Landing(){
                         <span className="font-mono text-[11px] md:text-[12px] text-white/45">
                             no account &nbsp;·&nbsp; no card &nbsp;·&nbsp; first run is just a run
                         </span>
+                        <ScrollCue />
                     </div>
                 </div>
             </div>
 
-            {/* ═══════════ 2 · THE MAGIC MOMENT — it refuses ═══════════ */}
-            {/* The hero is deliberately NOT wrapped — it's above the fold, so
-                fading it in would just delay the first thing anyone reads. */}
             <Reveal>
-            {/* The nav's "How it works" lands here — this section IS the
-                explanation, so it's the honest target. */}
             <div id="how-it-works" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-25">
                 <SectionHead eyebrow="watch it refuse" eyebrowColor="text-(--violet)" title="The AI that won't do your homework.">
                     Every other assistant hands over the fix. This one asks you a question and waits. Here&rsquo;s a real session &mdash; the student arrives wanting the answer, and leaves having written it.
                 </SectionHead>
 
-                {/* Below lg this is a plain column: card, then callout underneath.
-                    At lg it becomes the positioning context and the callout floats. */}
                 <div className="relative w-full max-w-[1180px] mt-10 md:mt-11.5 flex flex-col items-center gap-7 lg:block lg:gap-0">
 
                     <div className="w-full max-w-[780px] lg:mx-auto border border-(--line) rounded-2xl bg-(--panel) overflow-hidden shadow-[0_24px_70px_rgba(0,0,0,.5)]">
@@ -229,7 +203,6 @@ export default function Landing(){
 
                             <UserTurn delay="0s">my stack crashes when I pop. just fix it</UserTurn>
 
-                            {/* THE REFUSAL */}
                             <div className="turn flex flex-col gap-2.5 self-start max-w-[95%] md:max-w-[92%]" style={{ animationDelay: ".55s" }}>
                                 <LitmusTag />
                                 <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
@@ -242,7 +215,6 @@ export default function Landing(){
 
                             <UserTurn delay="1.5s">idk, return nothing?</UserTurn>
 
-                            {/* it reaches for THEIR notes, not its own knowledge */}
                             <div className="turn flex flex-col gap-2.5 self-start max-w-[95%] md:max-w-[92%]" style={{ animationDelay: "2.1s" }}>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <LitmusTag />
@@ -272,8 +244,6 @@ export default function Landing(){
                         </div>
                     </div>
 
-                    {/* The punchline. Arrow points UP at the card when stacked,
-                        LEFT at the refusal when it floats. */}
                     <div className="callout-in flex flex-col lg:flex-row items-center gap-3 max-w-[320px] text-center lg:text-left lg:absolute lg:right-0 lg:top-[118px]">
                         <svg viewBox="0 0 60 20" width="52" height="18" fill="none" stroke="rgba(139,92,246,.55)" strokeWidth="1.4" strokeDasharray="4 4" className="shrink-0 rotate-90 lg:rotate-0">
                             <path d="M58 10H2"/>
@@ -288,17 +258,14 @@ export default function Landing(){
 
             </Reveal>
 
-            {/* ═══════════ 3 · THE PROOF — and it isn't guessing ═══════════ */}
             <Reveal>
-            <div className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
+            <div id="receipt" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
                 <SectionHead eyebrow="the receipt" eyebrowColor="text-(--green)" title="It can say that because it ran your code.">
                     A tutor that guesses is worse than no tutor. When Litmus says your empty pop crashes, it isn&rsquo;t reading your code &mdash; it executed it in a container and read the log.
                 </SectionHead>
 
                 <div className="relative w-full max-w-[1120px] mt-10 md:mt-11.5">
 
-                    {/* Static pill above the panels until lg, where it floats on the
-                        top edge — it can't hang off a corner that isn't there. */}
                     <div className="flex justify-center mb-5 lg:mb-0 lg:absolute lg:-top-[19px] lg:right-[18px] lg:z-2">
                         <span className="flex items-center gap-2 px-4 py-2 rounded-full bg-(--violet) shadow-[0_0_34px_rgba(139,92,246,.65),0_6px_20px_rgba(0,0,0,.45)]">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6v6H9z"/></svg>
@@ -308,7 +275,6 @@ export default function Landing(){
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4.5">
 
-                        {/* what you wrote */}
                         <div className="border border-(--line) rounded-[14px] bg-[#0b0b0e] overflow-hidden">
                             <div className="flex items-center gap-2.5 px-4 md:px-4.5 py-3 border-b border-(--line-soft) bg-(--panel)">
                                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8a8a99" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M4 19V5a2 2 0 0 1 2-2h11l3 3v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></svg>
@@ -316,8 +282,6 @@ export default function Landing(){
                                 <span className="font-mono text-[10.5px] md:text-[11px] text-(--faint) ml-auto">what you wrote</span>
                             </div>
 
-                            {/* Mono lines don't wrap, so the panel scrolls rather than
-                                blowing out the page width. */}
                             <div className="overflow-x-auto py-4.5">
                                 <div className="font-mono text-[11px] md:text-[13.5px] leading-[1.95] w-max min-w-full">
                                     <div className="px-4 md:px-5.5 whitespace-pre"><span className="text-(--code-key)">class</span> <span className="text-(--code-fn)">BoundedStack</span>:</div>
@@ -331,7 +295,6 @@ export default function Landing(){
                                     <div className="px-4 md:px-5.5 whitespace-pre">{'        '}<span className="text-(--code-key)">self</span>._items.append(item)</div>
                                     <div className="px-4 md:px-5.5 whitespace-pre">{' '}</div>
                                     <div className="px-4 md:px-5.5 whitespace-pre">{'    '}<span className="text-(--code-key)">def</span> <span className="text-(--code-fn)">pop</span>(<span className="text-(--code-key)">self</span>):</div>
-                                    {/* the crash line */}
                                     <div className="flex items-center gap-4 px-4 md:px-5.5 py-0.5 bg-(--red)/10 border-l-2 border-l-(--red) whitespace-pre">
                                         <span className="underline decoration-wavy decoration-(--red) decoration-[1.5px] underline-offset-[5px]">{'        '}<span className="text-(--code-key)">return</span> <span className="text-(--code-key)">self</span>._items.pop()</span>
                                         <span className="text-[10.5px] md:text-[11px] text-(--red) ml-auto pl-3">line 17</span>
@@ -340,7 +303,6 @@ export default function Landing(){
                             </div>
                         </div>
 
-                        {/* what actually ran */}
                         <div className="border border-(--line) rounded-[14px] bg-[#0b0b0e] overflow-hidden">
                             <div className="flex items-center gap-2.5 px-4 md:px-4.5 py-3 border-b border-(--line-soft) bg-(--panel)">
                                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8a8a99" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/></svg>
@@ -350,9 +312,6 @@ export default function Landing(){
 
                             <div className="overflow-x-auto py-4.5">
                                 <div className="font-mono text-[11px] md:text-[13.5px] leading-[1.95] px-4 md:px-5.5 w-max min-w-full">
-                                    {/* Four passes land quickly, then a beat, then the
-                                        failure. That pause before [FAIL] is the whole
-                                        point of the section — don't even it out. */}
                                     <div className="term-line whitespace-pre text-(--muted)" style={{ animationDelay: "0s" }}><span className="text-(--violet)">$</span> pytest -q test_bounded_stack.py</div>
                                     <div className="whitespace-pre">{' '}</div>
                                     <div className="term-line whitespace-pre text-(--green)" style={{ animationDelay: ".22s" }}>[PASS]  test_push_within_capacity</div>
@@ -373,16 +332,12 @@ export default function Landing(){
 
             </Reveal>
 
-            {/* ═══════════ 4 · THE BRIDGE ═══════════ */}
             <Reveal>
-            <div className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
+            <div id="bridge" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
                 <SectionHead eyebrow="the bridge" eyebrowColor="text-(--violet)" title="Ship it tonight. Understand it before the exam.">
                     Deadline in twenty minutes? Take the working code. But every verified answer carries one button &mdash; and it hands the same problem to the tutor, so the thing you shipped doesn&rsquo;t stay a mystery.
                 </SectionHead>
 
-                {/* Stacked, the reading order carries the meaning: you have the
-                    answer → one click → now understand it. So the button sits
-                    BETWEEN them at every width, and only its arrow rotates. */}
                 <div className="grid grid-cols-1 lg:grid-cols-[1fr_236px_1fr] items-center gap-5 lg:gap-0 w-full max-w-[1120px] mt-10 md:mt-11.5">
 
                     <div className="border border-(--green)/35 rounded-[14px] bg-(--panel) overflow-hidden transition hover:border-(--violet)/85 hover:-translate-y-0.5">
@@ -400,12 +355,7 @@ export default function Landing(){
                         </div>
                     </div>
 
-                    {/* THE GESTURE */}
                     <div className="flex flex-col items-center gap-3 lg:px-4.5">
-                        {/* Deliberately a div, not a button. This is a PICTURE of a
-                            control that lives inside the app — making it focusable
-                            would let keyboard users tab into something that does
-                            nothing. */}
                         <div aria-hidden="true" className="flex items-center justify-center gap-2.5 w-full sm:w-auto lg:w-full h-12 px-6 rounded-xl bg-(--violet) text-white text-[14px] font-semibold shadow-[0_6px_28px_rgba(139,92,246,.55)]">
                             <span>Now teach me this</span>
                             <span className="text-[15px] rotate-90 lg:rotate-0 inline-block">&#8594;</span>
@@ -431,9 +381,8 @@ export default function Landing(){
 
             </Reveal>
 
-            {/* ═══════════ 5 · THE HONEST CARD ═══════════ */}
             <Reveal>
-            <div className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
+            <div id="honest" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
                 <SectionHead eyebrow="transparency" eyebrowColor="text-(--amber)" title="What Litmus can't do yet." />
 
                 <div className="w-full max-w-200 mt-10 md:mt-11 border border-(--line) rounded-[14px] bg-[#0b0b0e] overflow-hidden shadow-[0_18px_50px_rgba(0,0,0,.4)]">
@@ -451,7 +400,6 @@ export default function Landing(){
                             <div className="px-5 md:px-6.5 whitespace-pre">{'    '}<span className="text-(--code-str)">"Single Python files only"</span><span className="text-(--muted)">,</span></div>
                             <div className="px-5 md:px-6.5 whitespace-pre">{'    '}<span className="text-(--code-str)">"Basic note vector parsing"</span></div>
                             <div className="px-5 md:px-6.5 whitespace-pre text-(--muted)">{'  ],'}</div>
-                            {/* the promise is the point of the card, so it is the only lit line */}
                             <div className="px-5 md:px-6.5 pt-2 whitespace-pre bg-(--green)/8 border-l-2 border-l-(--green)">{'  '}<span className="text-[#a78bfa]">"unbreakable_promise"</span><span className="text-(--muted)">:</span></div>
                             <div className="px-5 md:px-6.5 pb-2 whitespace-pre bg-(--green)/8 border-l-2 border-l-(--green)">{'    '}<span className="text-(--green)">"We will never show you unverified code execution."</span></div>
                             <div className="px-5 md:px-6.5 whitespace-pre text-(--muted)">{'}'}</div>
@@ -462,9 +410,8 @@ export default function Landing(){
 
             </Reveal>
 
-            {/* ═══════════ 6 · FINAL CTA ═══════════ */}
             <Reveal>
-            <div className="flex flex-col items-center gap-5 px-5 md:px-14 pt-16 md:pt-24 lg:pt-29.5">
+            <div id="start" className="flex flex-col items-center gap-5 px-5 md:px-14 pt-16 md:pt-24 lg:pt-29.5">
                 <h3 className="display text-[28px] md:text-[40px] text-center text-balance max-w-[720px]">
                     Bring the assignment you don&rsquo;t understand.
                 </h3>
@@ -479,7 +426,6 @@ export default function Landing(){
 
             </Reveal>
 
-            {/* ═══════════ FOOTER ═══════════ */}
             <div className="flex flex-wrap items-center justify-center gap-2.5 px-5 md:px-14 pt-16 md:pt-19 pb-10 mt-12 md:mt-14 border-t border-(--line-soft)">
                 <Mark size={15} fill="#8b5cf6" className="opacity-55" />
                 <span className="font-mono text-[11px] md:text-[11.5px] text-(--faint) text-center">

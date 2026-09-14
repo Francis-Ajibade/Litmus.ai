@@ -1,38 +1,26 @@
-"""CodeRace persistence — the data layer behind the race.
-
-Framework-agnostic on purpose: nothing here imports FastAPI, the frontend, or
-the agent/sandbox code. It's a plain repository over Postgres that the
-orchestration layer (the CLI today, an API later) calls to record a race and to
-replay one. The seam is these functions; the storage behind them can change
-without touching the race.
-
-A race NEVER depends on the DB: persistence is a side effect recorded after the
-sandbox has spoken, never a step the verdict waits on.
-"""
-
-from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+from dotenv import load_dotenv
+from psycopg.errors import UniqueViolation
 
-# Default points at the local dev container (see README / brick 5 commit). A real
-# deployment overrides it via the environment; we never hardcode prod creds.
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://coderace:coderace@localhost:5432/coderace"
-)
+load_dotenv(override=True)
 
 _SCHEMA = Path(__file__).with_name("schema.sql")
 
-
 def connect() -> psycopg.Connection:
     """One connection, returning dict rows so callers read columns by name."""
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
-
+    # Read at call time, not import time. A module-level check makes importing this
+    # package require a configured database, so nothing here can be imported for a
+    # test or a type check without one.
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set — the database cannot be reached.")
+    return psycopg.connect(url, row_factory=dict_row, prepare_threshold=None)
 
 def init_db() -> None:
     """Create the tables if they don't exist. Idempotent — safe every startup."""
@@ -40,103 +28,256 @@ def init_db() -> None:
         cur.execute(_SCHEMA.read_text())
         conn.commit()
 
+def create_session(session_id: str, user_id: str, problem: str, title: str, course_id: str | None = None) -> None:
+    """Write the session row. The id is supplied, not generated.
 
-# --------------------------------------------------------------------------
-# Writes
-# --------------------------------------------------------------------------
+    gen_random_uuid() is only the column DEFAULT — naming session_id in the insert
+    overrides it. The caller mints the id on the first message so the in-memory
+    store has a key immediately, and this row is written later, once the problem
+    is known to be real. Nothing to return: the caller already has the id.
+    """
+    query = """
+    INSERT INTO session (session_id, user_id, problem, title, course_id)
+    VALUES (%s, %s, %s, %s, %s)
+    """
 
-def create_session(title: str, user_id: str = "local") -> str:
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO sessions (title, user_id) VALUES (%s, %s) RETURNING session_id",
-            (title, user_id),
-        )
-        conn.commit()
-        return str(cur.fetchone()["session_id"])
+        cur.execute(query, (session_id, user_id, problem, title, course_id))
+
+def create_style(
+    user_id: str,
+    title: str,
+    description: str,
+    sample_code: str,
+    created_in_run: str | None = None,
+) -> tuple[bool, dict]:
+    """Save a style. Returns (created, payload) — payload always carries a style_id.
+
+    Both outcomes hand back an id, so the caller has one thing to store whichever
+    way this went: the new row's id when it saved, the EXISTING row's id when the
+    title was taken. That second id is what makes the "update it?" prompt possible
+    — it is the row update_style will overwrite if the user says yes.
+
+    The id comes from Postgres, not from the caller. A style has no reason to be
+    named before it exists (unlike a session, whose id keys the in-memory store
+    from the first message), and RETURNING hands it back for free.
+    """
+    insert = """
+    INSERT INTO style (user_id, title, description, sample_code, created_in_run)
+    VALUES (%s, %s, %s, %s, %s)
+    RETURNING style_id
+    """
+
+    # Only reached on a conflict. It cannot run on the connection that raised:
+    # Postgres aborts the whole transaction on error, so every later statement
+    # there fails until a rollback. Exiting the `with` above closes that one, and
+    # this opens a fresh one.
+    existing = """
+    SELECT style_id FROM style WHERE user_id = %s AND title = %s
+    """
+
+    try:
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute(insert, (user_id, title, description, sample_code, created_in_run))
+
+            style_id = str(cur.fetchone()["style_id"])
+            return True, {"style_id": style_id, "message": "Style created"}
+
+    except UniqueViolation as e:
+        if e.diag.constraint_name != "idx_style_user_title":
+            raise
+
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute(existing, (user_id, title))
+            row = cur.fetchone()
+
+        # The row was deleted between the insert and this lookup — a real race, and
+        # one we cannot answer with a style_id. Let the original error surface.
+        if row is None:
+            raise
+
+        return False, {
+            "style_id": str(row["style_id"]),
+            "error": "You already have a style with this title.",
+        }
 
 
-def add_message(
+def update_style(
+    style_id: str,
+    user_id: str,
+    description: str,
+    sample_code: str,
+) -> bool:
+    """Overwrite a saved style in place. True if a row was actually updated.
+
+    user_id is in the WHERE clause, not trusted from the caller — the same
+    ownership check /api/chat does before handing back a session. A style_id
+    guessed or replayed by someone else matches nothing rather than editing a
+    stranger's library.
+
+    title is deliberately not updatable here: it is what identified this row in
+    the first place, and renaming a style is a different operation with its own
+    collision question.
+
+    created_at and created_in_run are left alone. They record where the style was
+    born, and that stays true no matter how often it is revised.
+    """
+    query = """
+    UPDATE style
+    SET description = %s,
+        sample_code = %s,
+        updated_at = NOW()
+    WHERE style_id = %s AND user_id = %s
+    RETURNING style_id
+    """
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query, (description, sample_code, style_id, user_id))
+        return cur.fetchone() is not None
+
+
+def save_session_state(session_id: str, state: dict) -> None:
+    # Matches nothing until create_session has written the row. That no-op IS the
+    # guard — a clarification exchange has no session to save against yet.
+    query = """
+    UPDATE session
+    SET state = %s,
+        updated_at = NOW()
+    WHERE session_id = %s
+    """
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query, (Jsonb(state), session_id))
+
+
+def load_session_state(session_id: str) -> dict | None:
+    # None for both "no such session" and "row saved no state yet".
+    query = """
+    SELECT state FROM session WHERE session_id = %s
+    """
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query, (session_id,))
+        row = cur.fetchone()
+
+    return row["state"] if row else None
+
+
+def list_styles(user_id: str) -> list[dict]:
+    # No sample_code — that only comes back when one style is opened.
+    # user_id in the WHERE is the access control; RLS never applies here.
+    query = """
+    SELECT style_id, title, description, updated_at
+    FROM style
+    WHERE user_id = %s
+    ORDER BY updated_at DESC
+    """
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query, (user_id,))
+        # str() because every style_id downstream is a str, not a uuid.UUID.
+        return [{**r, "style_id": str(r["style_id"])} for r in cur.fetchall()]
+
+
+def get_style(style_id: str, user_id: str) -> dict | None:
+    """One saved style, or None. user_id is in the WHERE, not checked after —
+    a guessed style_id must match nothing rather than read a stranger's row."""
+    query = """
+    SELECT style_id, title, description, sample_code, updated_at
+    FROM style
+    WHERE style_id = %s AND user_id = %s
+    """
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query, (style_id, user_id))
+        row = cur.fetchone()
+
+    if row is None:
+        return None
+    return {**row, "style_id": str(row["style_id"])}
+
+
+def create_run(
     session_id: str,
-    user_prompt: str,
-    user_specifications: str,
-    approved_blueprint: dict[str, Any],
-    generated_tests: str,
+    mode: str,
+    *,
+    blueprint: dict | None = None,
+    tests_used: str | None = None,
+    style_used: str | None = None,
+    transcript: list | dict | None = None,
+    attempts: list | dict | None = None,
+    student_code: str | None = None,
+    final_code: str | None = None,
+    mistakes: list | dict | None = None,
+    outcome: str | None = None,
+    tests_passed: int | None = None,
+    tests_total: int | None = None,
 ) -> str:
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """INSERT INTO messages
-                 (session_id, user_prompt, user_specifications, approved_blueprint, generated_tests)
-               VALUES (%s, %s, %s, %s, %s) RETURNING message_id""",
-            (session_id, user_prompt, user_specifications, Jsonb(approved_blueprint), generated_tests),
+    """Record a finished run and move its session to the top of the sidebar.
+
+    Keyword-only after session_id/mode: thirteen positional arguments is where
+    "passed student_code into final_code" bugs live.
+    """
+    insert = """
+        INSERT INTO run (
+            session_id, mode, blueprint, tests_used, style_used,
+            transcript, attempts, student_code, final_code, mistakes,
+            outcome, tests_passed, tests_total
         )
-        conn.commit()
-        return str(cur.fetchone()["message_id"])
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING run_id
+    """
 
-
-def record_run(
-    message_id: str,
-    model_name: str,
-    generated_code: str,
-    test_results: dict[str, Any] | list[Any],
-    accuracy: float | None,
-    execution_time_ms: float | None,
-    edge_cases_passed: int | None,
-    is_winner: bool,
-    lint_violations: dict[str, Any] | list[Any] | None = None,
-) -> str:
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
-            """INSERT INTO model_runs
-                 (message_id, model_name, generated_code, test_results, accuracy,
-                  execution_time_ms, edge_cases_passed, lint_violations, is_winner)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING run_id""",
+            insert,
             (
-                message_id, model_name, generated_code,
-                Jsonb(test_results), accuracy, execution_time_ms, edge_cases_passed,
-                Jsonb(lint_violations) if lint_violations is not None else None,
-                is_winner,
+                session_id,
+                mode,
+                Jsonb(blueprint) if blueprint is not None else None,
+                tests_used,
+                style_used,
+                Jsonb(transcript) if transcript is not None else None,
+                Jsonb(attempts) if attempts is not None else None,
+                student_code,
+                final_code,
+                Jsonb(mistakes) if mistakes is not None else None,
+                outcome,
+                tests_passed,
+                tests_total,
             ),
         )
-        conn.commit()
-        return str(cur.fetchone()["run_id"])
-
-
-# --------------------------------------------------------------------------
-# Reads (session replay + sidebar)
-# --------------------------------------------------------------------------
-
-def list_sessions(limit: int = 20) -> list[dict[str, Any]]:
-    """The sidebar: recent sessions, newest first."""
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT session_id, title, created_at FROM sessions ORDER BY created_at DESC LIMIT %s",
-            (limit,),
-        )
-        return cur.fetchall()
-
-
-def load_session(session_id: str) -> dict[str, Any] | None:
-    """Everything needed to replay a session: each turn, its locked blueprint and
-    test suite, and every model run (the historical leaderboard) under it."""
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM sessions WHERE session_id = %s", (session_id,))
-        session = cur.fetchone()
-        if session is None:
-            return None
+        run_id = str(cur.fetchone()["run_id"])
 
         cur.execute(
-            "SELECT * FROM messages WHERE session_id = %s ORDER BY created_at",
+            "UPDATE session SET updated_at = NOW() WHERE session_id = %s",
             (session_id,),
         )
-        messages = cur.fetchall()
+        return run_id
 
-        for msg in messages:
-            cur.execute(
-                """SELECT * FROM model_runs WHERE message_id = %s
-                   ORDER BY is_winner DESC, accuracy DESC NULLS LAST, execution_time_ms ASC""",
-                (msg["message_id"],),
-            )
-            msg["runs"] = cur.fetchall()
+def list_sessions(user_id, limit)-> list[str] :
+    """The sidebar: this user's sessions, most recently touched first.
 
-        session["messages"] = messages
-        return session
+    Ordered by updated_at, not created_at — a session worked on today belongs at
+    the top even if it was started last week. This is the query idx_session_user
+    exists for.
+    """
+    query = """
+        SELECT session_id, title
+        FROM session
+        WHERE user_id = %s
+        ORDER BY updated_at DESC
+        LIMIT %s
+    """
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query, (user_id, limit))
+        return cur.fetchall()
+
+def count_sessions(user_id:str) -> int :
+    query = """SELECT COUNT(*) FROM session WHERE user_id = %s"""
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query,(user_id,))
+        session_count = cur.fetchone()['count']
+
+    return session_count
