@@ -80,9 +80,9 @@ function throwForStatus(response: Response, label: string): never {
 const TIPS = [
     'click a case to run it with your own input',
     'switch between v1 and v2 to see what the repair changed',
-    'read the tests before the code — they are the actual contract',
+    'read the tests before the code; they are the actual contract',
     'a failing run is the useful one; it names what the code got wrong',
-    'edit the blueprint before locking it in — nothing runs until you approve',
+    'edit the blueprint before locking it in; nothing runs until you approve',
     'the console prints whatever your snippet returns, like a Python prompt',
     'paste a file you have written to have Litmus match your style',
 ]
@@ -372,8 +372,6 @@ export default function Litmus(){
     // The saved-style overlay: null when shut, otherwise which level is showing.
     const [styleView, setStyleView] = useState<StyleView | null>(null)
 
-    // The buttons chosen in order to go to the next stage 
-    const [button, setButton] = useState<ButtonChoice | null>(null)
 
     const highlighted = useMemo(() => highlight(code ?? ''), [code])
 
@@ -449,7 +447,7 @@ export default function Litmus(){
                 if (response.status === 404) {
                     clearSession()
                     navigate(WORKSPACE, { replace: true })
-                    setErrorMsg('That conversation is no longer on the server — start over.')
+                    setErrorMsg('That conversation is no longer on the server. Start over.')
                     return
                 }
                 if (!response.ok) throwForStatus(response, 'Could not open that session')
@@ -484,7 +482,7 @@ export default function Litmus(){
             if (response.status === 404) {
                 clearSession()
                 navigate(WORKSPACE, { replace: true })
-                setErrorMsg('That conversation is no longer on the server — start over.')
+                setErrorMsg('That conversation is no longer on the server. Start over.')
                 return
             }
             if (!response.ok) throwForStatus(response, 'Chat failed')
@@ -804,7 +802,7 @@ export default function Litmus(){
                                             ))}
                                         </div>
                                         <p className="m-0 font-mono text-[11px] text-[var(--faint)]">
-                                            the pane on the right shows your choice — it updates as you change it
+                                            the pane on the right shows your choice and updates as you change it
                                         </p>
                                     </>
                                 )}
@@ -1095,7 +1093,7 @@ export default function Litmus(){
                                         </pre>
                                     ) : (
                                         <p className="m-0 p-4 font-mono text-[11.5px] text-[var(--faint)]">
-                                            nothing to show yet — the diff appears after a restyle
+                                            nothing to show yet; the diff appears after a restyle
                                         </p>
                                     )}
                                 </div>

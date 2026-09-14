@@ -9,7 +9,7 @@ const PROMPTS = [
     "Write a Stack class with push, pop, and a peek that raises on empty…",
     "My binary search returns -1 for a value I know is in the array…",
     "Reverse a linked list without recursion, explicit types throughout…",
-    "Here's my merge sort — it works on 4 items and hangs on 5…",
+    "Here's my merge sort. It works on 4 items and hangs on 5…",
     "Build a grade calculator with strict PEP 8 and no external libraries…",
 ]
 
@@ -137,7 +137,8 @@ function MatrixRain() {
         }
     }, [])
 
-    return <canvas ref={ref} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
+    // opacity is the one knob for how loud the rain is next to the composer
+    return <canvas ref={ref} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full opacity-55" />
 }
 
 export default function SandboxHome() {

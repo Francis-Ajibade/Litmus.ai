@@ -23,10 +23,10 @@ const router = createBrowserRouter([
     element: <Shell />,
     children: [
       { index: true, element: <SandboxHome /> },
-      { path: "search",   element: <ComingSoon title="Search lands with saved sessions">Once runs are saved you can search them here — by problem, by course, by what broke.</ComingSoon> },
+      { path: "search",   element: <ComingSoon title="Search lands with saved sessions">Once runs are saved you can search them here: by problem, by course, by what broke.</ComingSoon> },
       { path: "templates", element: <ComingSoon title="Templates are coming">Starter problems you can run without pasting anything. They arrive with the September build.</ComingSoon> },
-      { path: "sessions",  element: <ComingSoon title="No sessions yet">Run something and it saves here — the problem, the code, and the tests that proved it.</ComingSoon> },
-      { path: "starred",   element: <ComingSoon title="Nothing starred yet">Star a session and it lands here — the ones worth reopening before an exam.</ComingSoon> },
+      { path: "sessions",  element: <ComingSoon title="No sessions yet">Run something and it saves here: the problem, the code, and the tests that proved it.</ComingSoon> },
+      { path: "starred",   element: <ComingSoon title="Nothing starred yet">Star a session and it lands here: the ones worth reopening before an exam.</ComingSoon> },
       { path: "courses/new", element: <ComingSoon title="Courses arrive with your notes">A course holds your notes and that class's sessions, so the tutor can answer out of your own material.</ComingSoon> },
     ],
   },

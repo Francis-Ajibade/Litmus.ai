@@ -37,9 +37,9 @@ const HEADLINE = 'Your work, where you left it.'
 
 // The lines that rotate underneath, one true claim about the product each.
 const LINES = [
-    "Sign in to save your sessions and courses. Everything you've worked through stays put — the transcript, the code, and the tests that proved it.",
+    "Sign in to save your sessions and styles. Everything you've worked through stays put: the transcript, the code, and the tests that proved it.",
     "Every line of code Litmus hands you ran in a sealed container first. Nothing is called working until it ran.",
-    "Quick fix writes it and proves it. Walk me through it makes you write it, and still proves it.",
+    "Quick fix writes it and proves it. The tutor lands next: it makes you write it, and still proves it.",
     "Your lecturer's tests and your lecturer's style, saved once and reused all semester.",
 ]
 
@@ -201,7 +201,7 @@ export default function SignIn() {
                         <div className="flex items-start gap-2.5 rounded-[10px] border border-(--glass-line) bg-(--glass-strong) px-3.5 py-3 backdrop-blur-lg">
                             <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--green)" />
                             <span className="text-[12.5px] leading-[1.6] text-white/82">
-                                Your guest session — <span className="font-mono text-[12px]">{guestSession.title}</span> — will attach to this account.
+                                Your guest session, <span className="font-mono text-[12px]">{guestSession.title}</span>, will attach to this account.
                             </span>
                         </div>
                     )}
@@ -224,7 +224,7 @@ export default function SignIn() {
                     <div className="flex flex-col gap-1.5">
                         <h2 className="display text-[22px] text-(--text)">{isSignUp ? 'Create an account' : 'Sign in to Litmus'}</h2>
                         <span className="text-[13px] text-(--muted)">
-                            No wizard, no setup. You land straight back in your session.
+                            No wizard, no setup. You land straight in the sandbox.
                         </span>
                     </div>
 
@@ -257,7 +257,7 @@ export default function SignIn() {
                                 value={email}
                                 onChange={e => setEmail(e.target.value)}
                                 autoComplete="email"
-                                placeholder="you@gmail.com"
+                                placeholder="you@school.edu"
                                 className="h-11 rounded-[10px] border border-(--line) bg-(--panel-2) px-3.5 text-[14px] text-(--text) outline-none transition-colors placeholder:text-(--faint) focus:border-(--violet)"
                             />
                         </label>
@@ -314,7 +314,7 @@ export default function SignIn() {
                     </div>
 
                     <span className="mt-1 text-center font-mono text-[10.5px] leading-[1.7] text-(--faint)">
-                        Auth is handled by Supabase.
+                        Sign-in runs on Supabase. Your password never touches Litmus&rsquo;s servers.
                     </span>
                 </div>
             </div>

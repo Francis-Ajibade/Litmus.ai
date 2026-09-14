@@ -106,6 +106,15 @@ function ScrollCue() {
     )
 }
 
+// What Litmus remembers per student. Verifier-side items read as live, since
+// launch waits for them; the rest keep their real status.
+const REMEMBERED = [
+    { what: 'your style', status: 'saved and reused', live: true },
+    { what: 'your test suites', status: 'saved and reused', live: true },
+    { what: 'your courses', status: 'coming', live: false },
+    { what: 'where you actually get stuck, verified from real runs', status: 'later', live: false },
+]
+
 export default function Landing(){
     // The bar is invisible at rest and becomes glass once the page moves.
     const [scrolled, setScrolled] = useState(false)
@@ -141,6 +150,12 @@ export default function Landing(){
                         >
                             Sign in
                         </Link>
+                        <Link
+                            to="/sandbox"
+                            className="flex items-center h-8 px-3.5 rounded-[9px] bg-(--violet) text-white text-[13px] font-semibold transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                        >
+                            Try it
+                        </Link>
                     </div>
             </div>
 
@@ -166,7 +181,7 @@ export default function Landing(){
                     </p>
 
                     <p className="mt-3.5 max-w-150 text-[14px] md:text-[15.5px] leading-[1.65] text-white/55 text-pretty">
-                        Litmus is the AI that makes you write it &mdash; and runs it to prove you got there.
+                        Litmus is the AI that makes you write it, and runs it to prove you got there.
                     </p>
 
                     <div className="flex flex-col items-center gap-4 mt-10 md:mt-10.5 w-full">
@@ -175,7 +190,7 @@ export default function Landing(){
                             <span className="text-[17px]">&#8594;</span>
                         </Link>
                         <span className="font-mono text-[11px] md:text-[12px] text-white/45">
-                            no account &nbsp;·&nbsp; no card &nbsp;·&nbsp; first run is just a run
+                            free &nbsp;·&nbsp; no card &nbsp;·&nbsp; sign in to start
                         </span>
                         <ScrollCue />
                     </div>
@@ -185,7 +200,7 @@ export default function Landing(){
             <Reveal>
             <div id="how-it-works" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-25">
                 <SectionHead eyebrow="watch it refuse" eyebrowColor="text-(--violet)" title="The AI that won't do your homework.">
-                    Every other assistant hands over the fix. This one asks you a question and waits. Here&rsquo;s a real session &mdash; the student arrives wanting the answer, and leaves having written it.
+                    Every other assistant hands over the fix. This one asks you a question and waits. This is the tutor I&rsquo;m building next: the student arrives wanting the answer, and leaves having written it.
                 </SectionHead>
 
                 <div className="relative w-full max-w-[1180px] mt-10 md:mt-11.5 flex flex-col items-center gap-7 lg:block lg:gap-0">
@@ -195,6 +210,9 @@ export default function Landing(){
                         <div className="flex flex-wrap items-center gap-2.5 px-4 md:px-5 py-3.5 border-b border-(--line-soft)">
                             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-(--violet)/15 border border-(--violet)/40 font-mono text-[10.5px] text-[#c4b5fd]">
                                 Walk me through it
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-(--amber)/10 border border-(--amber)/35 font-mono text-[10px] text-(--amber)">
+                                coming next
                             </span>
                             <span className="font-mono text-[11px] text-(--faint)">Data Structures &nbsp;·&nbsp; BoundedStack</span>
                         </div>
@@ -206,27 +224,22 @@ export default function Landing(){
                             <div className="turn flex flex-col gap-2.5 self-start max-w-[95%] md:max-w-[92%]" style={{ animationDelay: ".55s" }}>
                                 <LitmusTag />
                                 <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
-                                    I ran it &mdash; it throws an <span className="font-mono text-[13px] md:text-[14px] text-(--red)">IndexError</span> the moment you pop an empty stack.
+                                    I ran it. It throws an <span className="font-mono text-[13px] md:text-[14px] text-(--red)">IndexError</span> the moment you pop an empty stack.
                                 </p>
                                 <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--text) font-medium">
-                                    Before I say more &mdash; what do <i>you</i> think should happen when someone pops from a stack that&rsquo;s empty?
+                                    Before I say more: what do <i>you</i> think should happen when someone pops from a stack that&rsquo;s empty?
                                 </p>
                             </div>
 
                             <UserTurn delay="1.5s">idk, return nothing?</UserTurn>
 
                             <div className="turn flex flex-col gap-2.5 self-start max-w-[95%] md:max-w-[92%]" style={{ animationDelay: "2.1s" }}>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <LitmusTag />
-                                    <span className="font-mono text-[10.5px] text-(--faint)/75">· from your Week 3 notes</span>
-                                </div>
-                                <div className="px-4 py-3 border-l-2 border-l-(--violet) rounded-r-[10px] bg-(--panel-2)">
-                                    <span className="text-[13.5px] md:text-[14.5px] leading-[1.75] text-(--tip) italic">
-                                        &ldquo;When an operation cannot be completed &mdash; such as popping from an empty stack &mdash; the structure should raise an exception rather than return a value.&rdquo;
-                                    </span>
-                                </div>
+                                <LitmusTag />
                                 <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
-                                    So given that &mdash; what should your <span className="font-mono text-[13px] md:text-[14px] text-(--text)">pop()</span> do instead?
+                                    A stack that can&rsquo;t finish an operation (like popping when it&rsquo;s empty) should raise an exception, not return a value.
+                                </p>
+                                <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
+                                    So given that, what should your <span className="font-mono text-[13px] md:text-[14px] text-(--text)">pop()</span> do instead?
                                 </p>
                             </div>
 
@@ -261,7 +274,7 @@ export default function Landing(){
             <Reveal>
             <div id="receipt" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
                 <SectionHead eyebrow="the receipt" eyebrowColor="text-(--green)" title="It can say that because it ran your code.">
-                    A tutor that guesses is worse than no tutor. When Litmus says your empty pop crashes, it isn&rsquo;t reading your code &mdash; it executed it in a container and read the log.
+                    A tutor that guesses is worse than no tutor. When Litmus says your empty pop crashes, it isn&rsquo;t reading your code. It executed it in a container and read the log.
                 </SectionHead>
 
                 <div className="relative w-full max-w-[1120px] mt-10 md:mt-11.5">
@@ -333,12 +346,84 @@ export default function Landing(){
             </Reveal>
 
             <Reveal>
-            <div id="bridge" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
-                <SectionHead eyebrow="the bridge" eyebrowColor="text-(--violet)" title="Ship it tonight. Understand it before the exam.">
-                    Deadline in twenty minutes? Take the working code. But every verified answer carries one button &mdash; and it hands the same problem to the tutor, so the thing you shipped doesn&rsquo;t stay a mystery.
+            <div id="why" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
+                <SectionHead eyebrow="the honest question" eyebrowColor="text-(--violet)" title="Claude can do it. GPT can do it. So why Litmus?">
+                    They can write the code, match a style, even run a snippet. Here&rsquo;s what a chat box can&rsquo;t do.
                 </SectionHead>
 
-                <div className="grid grid-cols-1 lg:grid-cols-[1fr_236px_1fr] items-center gap-5 lg:gap-0 w-full max-w-[1120px] mt-10 md:mt-11.5">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4.5 w-full max-w-[1120px] mt-10 md:mt-11.5">
+
+                    <div className="flex flex-col gap-3 p-5 md:p-6 border border-(--green)/35 rounded-[14px] bg-(--panel)">
+                        <h4 className="text-[16px] md:text-[17px] font-semibold tracking-[-0.01em] text-white">Proof, not vibes.</h4>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
+                            When a chat AI says &ldquo;this passes,&rdquo; it is grading its own homework. Litmus hands your code to a sealed sandbox, and the verdict comes from the tests, not the model.
+                        </p>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--text)">
+                            A chat box can tell you your code works when it doesn&rsquo;t. Litmus structurally can&rsquo;t.
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 p-5 md:p-6 border border-(--line) rounded-[14px] bg-(--panel)">
+                        <h4 className="text-[16px] md:text-[17px] font-semibold tracking-[-0.01em] text-white">Reliability by default.</h4>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
+                            No re-pasting your professor&rsquo;s tests, no reminding it of your style every chat. Litmus saves your style and your test suites once and reuses them. Your course comes next.
+                        </p>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--text)">
+                            ChatGPT starts every chat from zero.
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 p-5 md:p-6 border border-(--line) rounded-[14px] bg-(--panel)">
+                        <div className="flex flex-wrap items-center gap-2.5">
+                            <h4 className="text-[16px] md:text-[17px] font-semibold tracking-[-0.01em] text-white">Runs while it teaches.</h4>
+                            <span className="px-2 py-0.5 rounded-md bg-(--amber)/10 border border-(--amber)/35 font-mono text-[10px] text-(--amber)">
+                                coming next
+                            </span>
+                        </div>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
+                            A chat box&rsquo;s run button executes one isolated script. The tutor I&rsquo;m building runs your own code in the sandbox while it guides you.
+                        </p>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--text)">
+                            You write it, run it and learn it in one place.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            </Reveal>
+
+            <Reveal>
+            <div id="bridge" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
+                <SectionHead eyebrow="two ways in" eyebrowColor="text-(--violet)" title="Ship it tonight. Understand it before the exam.">
+                    Deadline in twenty minutes? Take the working code. Exam next week? Learn it properly.
+                </SectionHead>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4.5 w-full max-w-[1120px] mt-10 md:mt-11.5">
+
+                    <div className="flex flex-col gap-3 p-5 md:p-6 border border-(--violet)/40 rounded-[14px] bg-(--panel)">
+                        <div className="flex flex-wrap items-center gap-2.5">
+                            <span className="px-2.5 py-1 rounded-md bg-(--violet)/15 border border-(--violet)/40 font-mono text-[10.5px] text-[#c4b5fd]">Walk me through it</span>
+                            <span className="px-2 py-0.5 rounded-md bg-(--amber)/10 border border-(--amber)/35 font-mono text-[10px] text-(--amber)">coming next</span>
+                        </div>
+                        <h4 className="text-[16px] md:text-[17px] font-semibold tracking-[-0.01em] text-white">Guides you to write it yourself.</h4>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
+                            Won&rsquo;t hand you the answer. Checks your code in the sandbox as you learn.
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 p-5 md:p-6 border border-(--green)/35 rounded-[14px] bg-(--panel)">
+                        <div className="flex flex-wrap items-center gap-2.5">
+                            <span className="px-2.5 py-1 rounded-md bg-(--green)/10 border border-(--green)/35 font-mono text-[10.5px] text-(--green)">Quick fix</span>
+                        </div>
+                        <h4 className="text-[16px] md:text-[17px] font-semibold tracking-[-0.01em] text-white">Generates it, tests it, repairs it.</h4>
+                        <p className="text-[14px] md:text-[15px] leading-[1.7] text-(--muted)">
+                            Then hands you the receipt: every test it ran, and the verdict from the sandbox.
+                        </p>
+                    </div>
+                </div>
+
+                <span className="mt-14 md:mt-16 font-mono text-[11px] tracking-[.1em] uppercase text-(--violet)">the bridge</span>
+
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_236px_1fr] items-center gap-5 lg:gap-0 w-full max-w-[1120px] mt-5 md:mt-6">
 
                     <div className="border border-(--green)/35 rounded-[14px] bg-(--panel) overflow-hidden transition hover:border-(--violet)/85 hover:-translate-y-0.5">
                         <div className="flex items-center gap-2.5 px-4 md:px-4.5 py-3 border-b border-(--line-soft)">
@@ -372,13 +457,46 @@ export default function Landing(){
                         <div className="flex flex-col gap-2.5 px-4 md:px-5 py-4">
                             <LitmusTag />
                             <p className="text-[13.5px] md:text-[14px] leading-[1.7] text-(--muted)">
-                                You&rsquo;ve got working code. So &mdash; why does the guard have to come <i>before</i> the removal? What breaks if you swap them?
+                                You&rsquo;ve got working code. So why does the guard have to come <i>before</i> the removal? What breaks if you swap them?
                             </p>
                         </div>
                     </div>
                 </div>
+                <p className="mt-6 max-w-[620px] text-center text-[14px] md:text-[15px] leading-[1.65] text-(--muted) text-pretty">
+                    Get the fast answer. When the tutor lands, one click carries it in, so you learn why it works.
+                </p>
             </div>
 
+            </Reveal>
+
+            <Reveal>
+            <div id="degree" className="flex flex-col items-center px-5 md:px-14 pt-15 md:pt-20 lg:pt-27.5">
+                <SectionHead eyebrow="it gets to know your degree" eyebrowColor="text-(--violet)" title="The longer you use it, the more it knows your semester.">
+                    ChatGPT starts every chat from a blank slate. Litmus keeps what makes your work yours.
+                </SectionHead>
+
+                <div className="w-full max-w-200 mt-10 md:mt-11 border border-(--line) rounded-[14px] bg-[#0b0b0e] overflow-hidden shadow-[0_18px_50px_rgba(0,0,0,.4)]">
+                    <div className="flex items-center gap-2.5 px-4 md:px-5 py-3 border-b border-(--line-soft) bg-(--panel)">
+                        <span className="font-mono text-[12px] md:text-[12.5px] text-(--text)">what it keeps</span>
+                        <span className="font-mono text-[10.5px] md:text-[11px] text-(--faint) ml-auto">across every session</span>
+                    </div>
+                    <ul className="divide-y divide-(--line-soft)">
+                        {REMEMBERED.map(r => (
+                            <li key={r.what} className="flex items-center gap-3 px-4 md:px-5 py-3.5">
+                                {r.live ? (
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#3fb950" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M20 6 9 17l-5-5"/></svg>
+                                ) : (
+                                    <span className="grid h-[15px] w-[15px] shrink-0 place-items-center"><span className="h-2 w-2 rounded-full border border-(--faint)" /></span>
+                                )}
+                                <span className={`min-w-0 text-[14px] md:text-[15px] text-pretty ${r.live ? 'text-(--text)' : 'text-(--muted)'}`}>{r.what}</span>
+                                <span className={`ml-auto shrink-0 font-mono text-[11px] md:text-[12px] ${
+                                    r.live ? 'text-(--green)' : r.status === 'coming' ? 'text-(--amber)' : 'text-(--faint)'
+                                }`}>{r.status}</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
             </Reveal>
 
             <Reveal>
@@ -398,14 +516,29 @@ export default function Landing(){
                             <div className="px-5 md:px-6.5 whitespace-pre">{'  '}<span className="text-(--code-key)">"version"</span><span className="text-(--muted)">:</span> <span className="text-(--code-str)">"v0.1-rough"</span><span className="text-(--muted)">,</span></div>
                             <div className="px-5 md:px-6.5 whitespace-pre">{'  '}<span className="text-(--code-key)">"current_limitations"</span><span className="text-(--muted)">: [</span></div>
                             <div className="px-5 md:px-6.5 whitespace-pre">{'    '}<span className="text-(--code-str)">"Single Python files only"</span><span className="text-(--muted)">,</span></div>
-                            <div className="px-5 md:px-6.5 whitespace-pre">{'    '}<span className="text-(--code-str)">"Basic note vector parsing"</span></div>
+                            <div className="px-5 md:px-6.5 whitespace-pre">{'    '}<span className="text-(--code-str)">"Sign-in required"</span><span className="text-(--muted)">,</span></div>
+                            <div className="px-5 md:px-6.5 whitespace-pre">{'    '}<span className="text-(--code-str)">"Tutor: landing next"</span><span className="text-(--muted)">,</span></div>
+                            <div className="px-5 md:px-6.5 whitespace-pre">{'    '}<span className="text-(--code-str)">"Course notes: coming"</span></div>
                             <div className="px-5 md:px-6.5 whitespace-pre text-(--muted)">{'  ],'}</div>
                             <div className="px-5 md:px-6.5 pt-2 whitespace-pre bg-(--green)/8 border-l-2 border-l-(--green)">{'  '}<span className="text-[#a78bfa]">"unbreakable_promise"</span><span className="text-(--muted)">:</span></div>
-                            <div className="px-5 md:px-6.5 pb-2 whitespace-pre bg-(--green)/8 border-l-2 border-l-(--green)">{'    '}<span className="text-(--green)">"We will never show you unverified code execution."</span></div>
+                            <div className="px-5 md:px-6.5 pb-2 whitespace-pre bg-(--green)/8 border-l-2 border-l-(--green)">{'    '}<span className="text-(--green)">"I will never show you unverified code execution."</span></div>
                             <div className="px-5 md:px-6.5 whitespace-pre text-(--muted)">{'}'}</div>
                         </div>
                     </div>
                 </div>
+                <p className="mt-6 max-w-[620px] text-center text-[14px] md:text-[15px] leading-[1.65] text-(--muted) text-pretty">
+                    Litmus is v0 and rough. Python for now, more coming. Try it, break it, tell me what&rsquo;s wrong.
+                </p>
+                {/* Inert until the feedback form exists: drop `disabled` and add the handler. */}
+                <button
+                    type="button"
+                    disabled
+                    title="The feedback form is on its way"
+                    className="mt-4 flex items-center gap-2 h-10 px-4.5 rounded-[11px] border border-(--line) bg-(--panel) text-[13.5px] text-(--text) disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                    Send feedback
+                    <span className="rounded-[5px] bg-(--line) px-1 py-px font-mono text-[9px] tracking-[.04em] text-(--faint)">soon</span>
+                </button>
             </div>
 
             </Reveal>
@@ -416,11 +549,11 @@ export default function Landing(){
                     Bring the assignment you don&rsquo;t understand.
                 </h3>
                 <Link to="/sandbox" className="flex items-center justify-center gap-2.5 w-full sm:w-auto h-13.5 px-8 rounded-[13px] bg-(--violet) text-white text-[15.5px] md:text-[17px] font-semibold tracking-[-0.01em] shadow-[0_6px_28px_rgba(139,92,246,.5)] transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
-                    <span>Try it &mdash; no signup</span>
+                    <span>Try it on your assignment</span>
                     <span className="text-[17px]">&#8594;</span>
                 </Link>
                 <span className="font-mono text-[11px] md:text-[12px] text-(--faint) text-center text-pretty">
-                    one free run, then it asks &mdash; and only because it wants to save your work
+                    sign in first, so every run and every saved style is still there tomorrow
                 </span>
             </div>
 
@@ -429,7 +562,7 @@ export default function Landing(){
             <div className="flex flex-wrap items-center justify-center gap-2.5 px-5 md:px-14 pt-16 md:pt-19 pb-10 mt-12 md:mt-14 border-t border-(--line-soft)">
                 <Mark size={15} fill="#8b5cf6" className="opacity-55" />
                 <span className="font-mono text-[11px] md:text-[11.5px] text-(--faint) text-center">
-                    litmus &mdash; the AI that makes you learn it &nbsp;·&nbsp; building in public
+                    litmus &nbsp;·&nbsp; the AI that makes you learn it &nbsp;·&nbsp; building in public
                 </span>
             </div>
 

@@ -224,7 +224,7 @@ def serialize_result(result : SandboxResult) -> dict:
     
 
 DECLINE = (
-    "I help with coding problems — try pasting a coding question, "
+    "I help with coding problems. Try pasting a coding question, "
     "an assignment, or the code that's breaking."
 )
 
@@ -388,7 +388,7 @@ async def litmus_chat(
             row = get_style(action, user.user_id)
 
             if row is None:
-                reply = "That style isn't saved any more — pick another."
+                reply = "That style isn't saved any more. Pick another."
                 msgs = [
                     Msg(role="user", text="Use a saved style"),
                     Msg(role="litmus", text=reply, options=style_choices(user.user_id)),

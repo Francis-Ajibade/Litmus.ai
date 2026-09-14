@@ -34,7 +34,7 @@ const SignOutIcon = () => <Icon size={15}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0
 function ModeToggle({ collapsed }: { collapsed: boolean }) {
     if (collapsed) {
         return (
-            <div className="mb-3.5 flex justify-center" title="Verifier — the tutor is coming">
+            <div className="mb-3.5 flex justify-center" title="Verifier · the tutor is coming">
                 <span className="grid h-8 w-8 place-items-center rounded-[9px] bg-(--panel-2) text-(--violet)">
                     <WandIcon />
                 </span>
@@ -209,7 +209,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
                 <SectionLabel collapsed={collapsed}>Courses</SectionLabel>
                 {!collapsed && (
                     <p className="px-2.5 py-1.5 text-[11.5px] leading-[1.5] text-(--faint)">
-                        No courses yet — add one to ground the tutor in your notes.
+                        No courses yet. Add one to ground the tutor in your notes.
                     </p>
                 )}
                 <NavRow to="/sandbox/courses/new" collapsed={collapsed} icon={<PlusIcon />} label="New course" />
@@ -218,7 +218,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
                     <>
                         <SectionLabel collapsed={false}>Recents</SectionLabel>
                         <p className="px-2.5 py-1.5 text-[11.5px] leading-[1.5] text-(--faint)">
-                            Nothing here yet — your last few sessions land here.
+                            Nothing here yet. Your last few sessions land here.
                         </p>
                     </>
                 )}
