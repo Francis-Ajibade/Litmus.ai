@@ -1,9 +1,8 @@
-import { supabase } from "./supabase"
+import { ensureSession } from "./session"
 
-// Headers for a call to our API.
 export async function authHeaders() {
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
+    const session = await ensureSession()
+    const token = session?.access_token
 
     return {
         'Content-Type': 'application/json',
