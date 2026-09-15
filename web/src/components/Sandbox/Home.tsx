@@ -162,7 +162,7 @@ export default function SandboxHome() {
 
             <div className="relative z-2 flex w-full max-w-[760px] flex-col items-center">
 
-                <h1 className="flex min-h-[58px] items-center text-center font-mono text-[38px] font-bold tracking-[-.02em] text-white md:text-[58px]">
+                <h1 className="display flex min-h-[58px] items-center text-center text-[38px] text-white md:text-[58px]">
                     {headline}
                     <span
                         aria-hidden="true"

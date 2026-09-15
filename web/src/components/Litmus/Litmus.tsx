@@ -131,10 +131,10 @@ function OptionRow<T extends string>({ id, label, hint, off, active, locked, del
                             : 'border-[var(--line)] bg-[var(--panel-2)] hover:border-[var(--pick-dim)]'
             }`}
         >
-            <span className={`font-mono text-[12.5px] ${active ? 'text-[var(--pick)]' : 'text-[var(--text)]'}`}>
+            <span className={`text-[13.5px] font-medium ${active ? 'text-[var(--pick)]' : 'text-[var(--text)]'}`}>
                 {active ? '\u2713 ' : ''}{label}
             </span>
-            {hint && <span className="font-mono text-[11px] text-[var(--faint)]">{hint}</span>}
+            {hint && <span className="text-[12px] text-[var(--faint)]">{hint}</span>}
         </button>
     )
 }
@@ -318,7 +318,7 @@ function StyleOverlay({ view, onOpen, onBack, onClose, onAccept }: {
                                 className="slide-in-left w-full rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-3.5 py-3 text-left transition-colors hover:border-[var(--violet)]"
                             >
                                 <div className="flex items-baseline justify-between gap-3">
-                                    <span className="truncate font-mono text-[13px] text-[var(--text)]">{st.title}</span>
+                                    <span className="truncate text-[14px] font-medium text-[var(--text)]">{st.title}</span>
                                     <span className="shrink-0 font-mono text-[10.5px] text-[var(--faint)]">{ago(st.updated_at)}</span>
                                 </div>
                                 {st.description && (
@@ -342,7 +342,7 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
             {children}
             <span
                 role="tooltip"
-                className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 -translate-x-1/2 translate-y-1 scale-95 whitespace-nowrap rounded-md border border-[var(--line)] bg-[var(--panel-3)] px-2 py-1 font-mono text-[10.5px] text-[var(--text)] opacity-0 shadow-[0_10px_28px_-10px_rgba(0,0,0,.95)] transition-all duration-150 ease-out group-hover/tip:translate-y-0 group-hover/tip:scale-100 group-hover/tip:opacity-100"
+                className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 -translate-x-1/2 translate-y-1 scale-95 whitespace-nowrap rounded-md border border-[var(--line)] bg-[var(--panel-3)] px-2 py-1 text-[10.5px] text-[var(--text)] opacity-0 shadow-[0_10px_28px_-10px_rgba(0,0,0,.95)] transition-all duration-150 ease-out group-hover/tip:translate-y-0 group-hover/tip:scale-100 group-hover/tip:opacity-100"
             >
                 {label}
             </span>
@@ -711,7 +711,7 @@ export default function Litmus(){
                         {stage !== 'idle' && (
                             <button
                                 onClick={startOver}
-                                className="rounded-md px-2.5 py-1.5 font-mono text-[11px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
+                                className="rounded-md px-2.5 py-1.5 text-[12px] text-[var(--faint)] transition-colors hover:bg-[var(--panel-3)] hover:text-[var(--text)]"
                             >
                                 + new problem
                             </button>
@@ -738,111 +738,112 @@ export default function Litmus(){
 
                 <div
                     onScroll={(e) => setThreadScrolled(e.currentTarget.scrollTop > 8)}
-                    className={`h-full overflow-y-auto px-4 pt-20 pb-44 flex flex-col gap-5 ${
-                        layout === 'thread' ? 'w-full max-w-[820px] mx-auto' : ''
-                    }`}
+                    className="h-full overflow-y-auto px-4 pt-20 pb-44"
                 >
+                    {/* the column is capped, not the scroller, so the wheel works over the margins too */}
+                    <div className={`flex flex-col gap-5 ${layout === 'thread' ? 'w-full max-w-[820px] mx-auto' : ''}`}>
 
-{messages.map((m, i) => {
-                        // Only the newest litmus bubble pulses; older ones are settled history.
-                        const isCurrent = i === messages.length - 1
+    {messages.map((m, i) => {
+                            // Only the newest litmus bubble pulses; older ones are settled history.
+                            const isCurrent = i === messages.length - 1
 
-                        if (m.role === 'user') return (
-                            <div key={i} className="self-end flex max-w-[85%] flex-col items-end gap-2">
-                                {m.pasted && (
-                                    <PastedCard text={m.pasted} onOpen={() => setExpanded({ text: m.pasted! })} />
-                                )}
-                                {m.text && (
-                                    <div className="rounded-[12px_12px_3px_12px] border border-[var(--line)] bg-[var(--panel-3)] px-3.5 py-2.5 text-[14px]">
-                                        {m.text}
-                                    </div>
-                                )}
-                            </div>
-                        )
-
-                        // One litmus message, one bubble. options and choices are
-                        // attachments under the text, not message kinds of their own.
-                        const [lead, rest] = m.text ? splitReply(m.text) : ['', null]
-
-                        return (
-                            <div key={i} className="fade-in self-start max-w-[92%] flex flex-col gap-2">
-                                <div className="flex items-center gap-2">
-                                    <span className={`${isCurrent ? 'pulse-ring ' : ''}grid place-items-center w-[17px] h-[17px] rounded-full bg-[var(--violet)] text-white font-mono text-[9px] font-bold`}>L</span>
-                                    <span className="font-mono text-[11px] text-[var(--faint)]">litmus</span>
+                            if (m.role === 'user') return (
+                                <div key={i} className="self-end flex max-w-[85%] flex-col items-end gap-2">
+                                    {m.pasted && (
+                                        <PastedCard text={m.pasted} onOpen={() => setExpanded({ text: m.pasted! })} />
+                                    )}
+                                    {m.text && (
+                                        <div className="rounded-[12px_12px_3px_12px] border border-[var(--line)] bg-[var(--panel-3)] px-3.5 py-2.5 text-[14px]">
+                                            {m.text}
+                                        </div>
+                                    )}
                                 </div>
+                            )
 
-                                {lead && (
-                                    <p className="m-0 text-[14px] text-[var(--muted)] leading-relaxed whitespace-pre-line">{lead}</p>
-                                )}
+                            // One litmus message, one bubble. options and choices are
+                            // attachments under the text, not message kinds of their own.
+                            const [lead, rest] = m.text ? splitReply(m.text) : ['', null]
 
-                                {rest && (
-                                    <PastedCard
-                                        text={rest}
-                                        label="EXPLANATION"
-                                        prose
-                                        onOpen={() => setExpanded({ text: rest, label: 'EXPLANATION', prose: true })}
-                                    />
-                                )}
+                            return (
+                                <div key={i} className="fade-in self-start max-w-[92%] flex flex-col gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className={`${isCurrent ? 'pulse-ring ' : ''}grid place-items-center w-[17px] h-[17px] rounded-full bg-[var(--violet)] text-white font-mono text-[9px] font-bold`}>L</span>
+                                        <span className="font-mono text-[11px] text-[var(--faint)]">litmus</span>
+                                    </div>
 
-                                {m.options && (
-                                    <>
-                                        <div className="mt-1 flex flex-col gap-1.5">
-                                            {m.options.map((o, j) => (
+                                    {lead && (
+                                        <p className="m-0 text-[14px] text-[var(--muted)] leading-relaxed whitespace-pre-line">{lead}</p>
+                                    )}
+
+                                    {rest && (
+                                        <PastedCard
+                                            text={rest}
+                                            label="EXPLANATION"
+                                            prose
+                                            onOpen={() => setExpanded({ text: rest, label: 'EXPLANATION', prose: true })}
+                                        />
+                                    )}
+
+                                    {m.options && (
+                                        <>
+                                            <div className="mt-1 flex flex-col gap-1.5">
+                                                {m.options.map((o, j) => (
+                                                    <OptionRow
+                                                        key={o.id}
+                                                        id={o.id}
+                                                        label={o.label}
+                                                        hint={o.hint}
+                                                        off={o.off}
+                                                        active={picked === o.id}
+                                                        locked={!isCurrent}
+                                                        delay={j * 70}
+                                                        onPick={handlePick}
+                                                    />
+                                                ))}
+                                            </div>
+                                            <p className="m-0 text-[12px] text-[var(--faint)]">
+                                                the pane on the right shows your choice and updates as you change it
+                                            </p>
+                                        </>
+                                    )}
+
+                                    {m.choices && (
+                                        <div className="mt-1 flex gap-1.5">
+                                            {m.choices.map((b, j) => (
                                                 <OptionRow
-                                                    key={o.id}
-                                                    id={o.id}
-                                                    label={o.label}
-                                                    hint={o.hint}
-                                                    off={o.off}
-                                                    active={picked === o.id}
+                                                    key={b}
+                                                    id={b}
+                                                    label={b}
+                                                    hint={BUTTON_CHOICES.find(c => c.id === b)?.hint}
                                                     locked={!isCurrent}
-                                                    delay={j * 70}
-                                                    onPick={handlePick}
+                                                    delay={280 + j * 70}
+                                                    onPick={handleClick}
                                                 />
                                             ))}
                                         </div>
-                                        <p className="m-0 font-mono text-[11px] text-[var(--faint)]">
-                                            the pane on the right shows your choice and updates as you change it
-                                        </p>
-                                    </>
-                                )}
-
-                                {m.choices && (
-                                    <div className="mt-1 flex gap-1.5">
-                                        {m.choices.map((b, j) => (
-                                            <OptionRow
-                                                key={b}
-                                                id={b}
-                                                label={b}
-                                                hint={BUTTON_CHOICES.find(c => c.id === b)?.hint}
-                                                locked={!isCurrent}
-                                                delay={280 + j * 70}
-                                                onPick={handleClick}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )
-                    })}
+                                    )}
+                                </div>
+                            )
+                        })}
 
                 
-                    {thinking && (
-                        <div className="self-start flex flex-col gap-2">
-                            <div className="dots" aria-label="thinking"><i /><i /><i /></div>
-                            {phrase && (
-                                <span key={phrase} className="fade-in font-mono text-[12px] text-[var(--faint)]">{phrase}</span>
-                            )}
-                        </div>
-                    )}
+                        {thinking && (
+                            <div className="self-start flex flex-col gap-2">
+                                <div className="dots" aria-label="thinking"><i /><i /><i /></div>
+                                {phrase && (
+                                    <span key={phrase} className="fade-in font-mono text-[12px] text-[var(--faint)]">{phrase}</span>
+                                )}
+                            </div>
+                        )}
 
-                    {errorMsg && (
-                        <div className="rounded-lg border border-[var(--red)]/40 bg-[var(--red)]/10 px-3 py-2 font-mono text-[12px] text-[var(--red)]">
-                            {errorMsg}
-                        </div>
-                    )}
+                        {errorMsg && (
+                            <div className="rounded-lg border border-[var(--red)]/40 bg-[var(--red)]/10 px-3 py-2 text-[13px] text-[var(--red)]">
+                                {errorMsg}
+                            </div>
+                        )}
 
-                    <div ref={bottomRef} />
+                        <div ref={bottomRef} />
+                    </div>
                 </div>
 
                 <div className={`absolute inset-x-0 bottom-0 z-30 px-3.5 pb-5 pt-10 pointer-events-none ${
@@ -1042,7 +1043,7 @@ export default function Litmus(){
                                 {stage === 'planning' ? 'Awaiting blueprint lock' : 'Sandbox idle'}
                             </h3>
                             <p key={TIPS[tipIndex]}
-                               className="fade-in m-0 min-h-[17px] text-center font-mono text-[12px] font-medium text-[var(--tip)]">
+                               className="fade-in m-0 min-h-[17px] text-center text-[13px] text-[var(--tip)]">
                                 {TIPS[tipIndex]}
                             </p>
                         </div>

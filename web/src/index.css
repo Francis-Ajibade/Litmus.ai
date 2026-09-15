@@ -319,6 +319,31 @@ html{ scroll-behavior:smooth }
 @keyframes slideInLeft { from { opacity:0; transform: translateX(-14px); } to { opacity:1; transform:none; } }
 .slide-in-left { animation: slideInLeft .36s ease both; }
 
+/* ---------- landing displays slide in from the right ----------
+   Gated on the section's reveal like .term-line, and visible by default for the
+   same reason: if the observer never fires, the content is simply there. */
+[data-shown="false"] .slide-in-right{ opacity:0 }
+[data-shown="true"]  .slide-in-right{ animation: slideInRight .7s cubic-bezier(.22,1,.36,1) both }
+/* split sections: the words come in from the left as the display comes from the right */
+[data-shown="false"] .split-from-left{ opacity:0 }
+[data-shown="true"]  .split-from-left{ animation: slideFromLeft .7s cubic-bezier(.22,1,.36,1) both }
+@keyframes slideFromLeft{
+  from { opacity:0; transform:translateX(-32px) }
+  to   { opacity:1; transform:none }
+}
+@media (prefers-reduced-motion:reduce){
+  [data-shown="false"] .split-from-left{ opacity:1 }
+  [data-shown="true"]  .split-from-left{ animation:none }
+}
+@keyframes slideInRight{
+  from { opacity:0; transform:translateX(32px) }
+  to   { opacity:1; transform:none }
+}
+@media (prefers-reduced-motion:reduce){
+  [data-shown="false"] .slide-in-right{ opacity:1 }
+  [data-shown="true"]  .slide-in-right{ animation:none }
+}
+
 /* ---------- the "model is thinking" ellipsis ---------- */
 .dots { display:inline-flex; gap:5px; align-items:center; }
 .dots i { width:5px; height:5px; border-radius:50%; background:var(--faint); animation: dotPulse 1.2s ease-in-out infinite; }

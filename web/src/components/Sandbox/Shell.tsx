@@ -29,7 +29,7 @@ export function ComingSoon({ title, children }: { title: string; children: React
     return (
         <div className="flex min-h-full items-center justify-center px-6 py-16">
             <div className="flex max-w-[440px] flex-col items-center gap-3 rounded-[14px] border border-dashed border-(--line) px-8 py-14 text-center">
-                <h1 className="font-mono text-[14px] font-semibold text-(--text)">{title}</h1>
+                <h1 className="display text-[18px] text-(--text)">{title}</h1>
                 <p className="text-[13px] leading-[1.65] text-(--muted)">{children}</p>
             </div>
         </div>
